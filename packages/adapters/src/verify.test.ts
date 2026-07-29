@@ -144,9 +144,57 @@ const healthyRoutes = [
   { match: /./, body: envelope(namesWith(100, {})) },
 ];
 
-describe("❗ verifyHira — 진료과목 코드는 상승도로 판정한다", () => {
+/**
+ * 이름 → 코드 전수 카운트를 지원하는 라우트 (2026-07-30 실측을 본뜬 것).
+ *
+ * `yadmNm` 만 있는 조회는 "이름에 그 키워드가 든 기관 수", 거기에 `dgsbjtCd` 가
+ * 붙으면 "그중 이 코드를 신고한 수" 다.
+ */
+const nameCodeRoutes = (dermWithCode: number, extra: Array<{ match: RegExp; body?: string }> = []) => [
+  ...extra,
+  { match: /yadmNm=[^&]+.*dgsbjtCd=14|dgsbjtCd=14.*yadmNm=/, body: envelope(derm(5), dermWithCode) },
+  { match: /yadmNm=[^&]+.*dgsbjtCd=08|dgsbjtCd=08.*yadmNm=/, body: envelope(derm(5), 998) },
+  { match: /yadmNm=/, body: envelope(derm(5), 1000) },
+  ...healthyRoutes,
+];
+
+describe("❗ verifyHira — 진료과목 코드는 이름 → 코드 전수 카운트로 판정한다", () => {
+  it("이름이 그 과목인 기관이 거의 전부 그 코드를 신고하면 확정이다", async () => {
+    const r = await verifyHira({ ...baseOptions, http: fakeHttp(nameCodeRoutes(999)) });
+    const check = r.checks.find((c) => c.name === "진료과목 코드 (derm: dgsbjtCd=14)")!;
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain("확정");
+    expect(check.detail).toContain("표본 오차가 없습니다");
+    expect(check.evidence).toContain("1000곳 중 dgsbjtCd=14 신고 999곳");
+  });
+
+  it("❗ 비율이 낮으면 fail 하고 같은 방법으로 올바른 코드를 찾는다", async () => {
+    const http = fakeHttp(
+      nameCodeRoutes(100, [
+        { match: /yadmNm=[^&]+.*dgsbjtCd=22|dgsbjtCd=22.*yadmNm=/, body: envelope(derm(5), 950) },
+      ]),
+    );
+    const r = await verifyHira({ ...baseOptions, http });
+    const check = r.checks.find((c) => c.name === "진료과목 코드 (derm: dgsbjtCd=14)")!;
+    expect(check.status).toBe("fail");
+    expect(check.evidence).toContain("탐색 결과");
+    expect(check.evidence).toContain("dgsbjtCd=22");
+  });
+
+  it("❗ 확정되면 상승도 휴리스틱을 돌리지 않는다 (틀린 답이 옆에 붙지 않게)", async () => {
+    const r = await verifyHira({ ...baseOptions, http: fakeHttp(nameCodeRoutes(999)) });
+    const dermChecks = r.checks.filter((c) => c.name.includes("진료과목 코드 (derm"));
+    expect(dermChecks.length).toBe(1);
+    expect(dermChecks[0]!.detail).not.toContain("증명이 아니라");
+  });
+});
+
+describe("verifyHira — 상승도 폴백 (이름 필터를 못 쓸 때)", () => {
+  /** `yadmNm` 조회가 0건이면 이름 필터를 지원하지 않는 것으로 보고 휴리스틱으로 넘어간다. */
+  const noNameFilter = [{ match: /yadmNm=/, body: envelope([], 0) }, ...healthyRoutes];
+
   it("상승도가 충분하면 pass", async () => {
-    const r = await verifyHira({ ...baseOptions, http: fakeHttp(healthyRoutes) });
+    const r = await verifyHira({ ...baseOptions, http: fakeHttp(noNameFilter) });
     expect(r.checks.find((c) => c.name === "진료과목 코드 (derm: dgsbjtCd=14)")!.status).toBe("pass");
     expect(r.checks.find((c) => c.name === "진료과목 코드 (plastic: dgsbjtCd=08)")!.status).toBe("pass");
     expect(r.checks.find((c) => c.name === "종별 코드 (dental: clCd=51)")!.status).toBe("pass");
@@ -154,6 +202,7 @@ describe("❗ verifyHira — 진료과목 코드는 상승도로 판정한다", 
 
   it("❗ 코드가 틀리면(대조군과 차이 없음) fail 하고 대체 코드를 탐색한다", async () => {
     const http = fakeHttp([
+      { match: /yadmNm=/, body: envelope([], 0) },
       { match: /dgsbjtCd=14/, body: envelope(namesWith(100, { 피부과: 2 })) },
       { match: /dgsbjtCd=22/, body: envelope(namesWith(100, { 피부과: 45 })) },
       ...healthyRoutes.slice(1),
@@ -165,8 +214,8 @@ describe("❗ verifyHira — 진료과목 코드는 상승도로 판정한다", 
     expect(check.evidence).toContain("dgsbjtCd=22");
   });
 
-  it("검사 결과가 증명이 아니라 신호임을 명시한다", async () => {
-    const r = await verifyHira({ ...baseOptions, http: fakeHttp(healthyRoutes) });
+  it("❗ 폴백 결과는 증명이 아니라 신호임을 명시한다", async () => {
+    const r = await verifyHira({ ...baseOptions, http: fakeHttp(noNameFilter) });
     expect(r.checks.find((c) => c.name === "진료과목 코드 (derm: dgsbjtCd=14)")!.detail).toContain("증명이 아니라");
   });
 

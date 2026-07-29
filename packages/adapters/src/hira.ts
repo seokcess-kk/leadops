@@ -40,26 +40,26 @@ const ENDPOINT = "https://apis.data.go.kr/B551182/hospInfoServicev2/getHospBasis
  */
 export const HIRA_CODES = {
   /**
-   * 진료과목: 피부과 — ❌ **미해결. 이 값은 틀렸을 가능성이 높다.**
+   * 진료과목: 피부과 — ✅ **확정** (2026-07-30 실키, 전수 카운트)
    *
-   * 실키 검증(2026-07-29): dgsbjtCd=14 로 조회하면 16,987건이 나오지만,
-   * 기관명에 '피부과' 가 든 비율이 대조군(의원 전체)과 **똑같이 2.0%** 다.
-   * 코드가 맞다면 실제 피부과 의원이 전부 포함되므로 비율이 올라가야 한다.
+   * 이름에 '피부과' 가 든 의원 **1,555곳 중 1,553곳(99.9%)** 이 `dgsbjtCd=14` 를 신고했다.
+   * `totalCount` 끼리의 비교라 표본 오차가 없다.
    *
-   * 00~25 를 전부 훑어도 유의미한 코드를 찾지 못했다. 이름 기반 판정의 한계다 —
-   * 실제 피부과 의원이 전체의 2% 뿐이라 표본 100건으로는 2%와 4%를 구분할 수 없다.
+   * ❗ 이 값은 한때 "틀렸을 가능성이 높다" 고 기록돼 있었다. **코드가 아니라 검증 방법이
+   *    틀렸다.** 코드 → 이름 방향(코드 14 로 거른 16,987건 중 이름에 '피부과' 가 몇 %인가)
+   *    으로 재면 상승도가 1.0배로 나온다. 피부과는 **전체 의원의 45%(37,819 중 16,987)가
+   *    신고하는 과목**이라 표본이 통째로 희석되기 때문이다. 실제로 성형외과 의원의 45.2%도
+   *    피부과를 함께 신고한다.
    *
-   * 해결 방법: data.go.kr 15001699(의료기관별상세정보서비스) 활용신청.
-   * `getDgsbjtInfo` 가 코드와 이름을 함께 주므로 추측이 사라진다.
-   * `pnpm spike verify` 가 그 데이터셋이 열리면 자동으로 코드표를 읽는다.
+   * 교훈: 다대다 관계에서는 **희소한 쪽에서 물어야 한다.**
    */
   dgsbjt_derm: "14",
 
   /**
-   * 진료과목: 성형외과 — ✅ **확인됨** (2026-07-29 실키)
+   * 진료과목: 성형외과 — ✅ **확정** (2026-07-30 실키, 전수 카운트)
    *
-   * 4,883건 중 기관명에 '성형외과' 포함 31.0%. 대조군 3.0% 대비 **10.3배**.
-   * 반대 과목('피부과')은 1.0배로 변화 없음 → 이 코드가 성형외과가 맞다.
+   * 이름에 '성형외과' 가 든 의원 **1,236곳 중 1,233곳(99.8%)** 이 `dgsbjtCd=08` 을 신고했다.
+   * (2026-07-29 의 이름 상승도 10.3배 관측과도 일치한다.)
    */
   dgsbjt_plastic: "08",
 
@@ -103,8 +103,14 @@ export interface HiraHospitalItem {
 export class HiraHospitalAdapter implements SourceAdapter {
   readonly sourceName = "hira_hospital";
   readonly supportedIndustries = ["derm", "plastic", "dental"] as const;
-  // ⚠️ 실제 API 응답으로 검증되지 않았음. Phase 0 에서 확인 후 변경할 것.
-  readonly verifiedAgainstLiveApi = false;
+  /**
+   * ✅ **검증됨** (2026-07-30, `pnpm spike verify` 실키 실행)
+   *
+   * 엔드포인트 · 필수 필드(ykiho·yadmNm) · 선택 필드(addr·telno·**hospUrl**) ·
+   * 진료과목 코드 14/08 · 종별 코드 51 이 모두 실응답으로 확인됐다.
+   * 응답은 `fixtures/http/` 에 녹화돼 회귀 테스트 입력으로 쓰인다.
+   */
+  readonly verifiedAgainstLiveApi = true;
 
   readonly #client: DataGoKrClient;
 

@@ -259,7 +259,8 @@ describe("createSourceAdapters", () => {
       FEATURE_SOURCE: "live",
       DATA_GO_KR_SERVICE_KEY: "k",
     });
-    expect(unverifiedAdapters(createSourceAdapters(env, fakeHttp))).toEqual(["hira_hospital", "ftc_franchise"]);
+    // HIRA 는 2026-07-30 실키 검증을 통과했다. 공정위만 남는다.
+    expect(unverifiedAdapters(createSourceAdapters(env, fakeHttp))).toEqual(["ftc_franchise"]);
   });
 });
 

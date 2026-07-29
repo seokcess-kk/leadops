@@ -220,11 +220,38 @@ function looseParse(body: string): ProbeResult["parsed"] | undefined {
   }
 }
 
+/** fixture 에 남길 항목 수. 회귀 테스트는 매핑을 보는 것이지 데이터를 쌓는 것이 아니다. */
+const FIXTURE_ITEMS = 5;
+
+/**
+ * 실응답을 회귀 테스트 입력으로 녹화한다.
+ *
+ * 항목을 몇 건만 남기고 자른다. 이유가 두 가지다.
+ *  1. 이 파일은 **커밋된다.** 실행할 때마다 100건이 통째로 바뀌면 diff 를 읽을 수 없다.
+ *  2. 공개 데이터라 재배포가 허용돼 있어도, 회귀 테스트에 필요한 만큼만 담는 편이 낫다.
+ *
+ * `totalCount` 는 자르지 않는다 — 모집단 크기는 그 자체가 검증 결과다.
+ */
 function recordFixture(dir: string | undefined, name: string, body: string): string | undefined {
   if (!dir) return undefined;
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${name}.json`);
-  writeFileSync(path, body, "utf8");
+
+  let out = body;
+  try {
+    const doc = JSON.parse(body) as Record<string, any>;
+    const responseBody = doc?.["response"]?.["body"];
+    const item = responseBody?.["items"]?.["item"];
+    if (Array.isArray(item)) {
+      responseBody["items"]["item"] = item.slice(0, FIXTURE_ITEMS);
+      responseBody["numOfRows"] = Math.min(FIXTURE_ITEMS, item.length);
+      out = `${JSON.stringify(doc, null, 2)}\n`;
+    }
+  } catch {
+    // JSON 이 아니면 원문 그대로 남긴다 — 형태를 모르는 응답일수록 원본이 중요하다.
+  }
+
+  writeFileSync(path, out, "utf8");
   return path;
 }
 
@@ -385,13 +412,92 @@ export async function verifyHira(options: VerifyOptions): Promise<AdapterVerific
       status: "warn",
       detail:
         "의료기관별상세정보서비스(15001699)에 접근할 수 없어 코드표를 직접 읽지 못했습니다. " +
-        "data.go.kr 에서 이 데이터셋을 활용신청하면 추측 없이 확정할 수 있습니다. " +
-        "아래는 이름 기반 휴리스틱이며, 피부과처럼 신고가 널리 퍼진 과목에는 무력합니다.",
+        "다만 **이것이 없어도 코드는 확정된다** — 아래 '진료과목 코드' 검사가 이름 → 코드 " +
+        "방향의 전수 카운트로 판정하므로 표본 오차가 없다. 코드표는 전체 목록을 한 번에 " +
+        "보고 싶을 때만 필요하다.",
       evidence: HIRA_DGSBJT_ENDPOINT_CANDIDATES.join("\n"),
     });
   }
 
-  // 대조군: 진료과목 필터 없이 의원 전체
+
+  /**
+   * ❗ 결정적 검증 — **방향을 뒤집는다.**
+   *
+   * "코드 X 로 거른 기관 중 이름에 '피부과' 가 몇 %인가" 는 답이 흐리다. 피부과는
+   * 전체 의원의 45%(37,819 중 16,987)가 신고하는 과목이라 표본이 통째로 희석된다.
+   * 실측에서 이 방향은 상승도 1.0 배가 나왔다 — 코드가 맞는데도 틀린 것처럼 보였다.
+   *
+   * 대신 **"이름이 '피부과' 인 기관은 어떤 코드를 신고했는가"** 를 묻는다.
+   * 이쪽은 답이 하나다: 피부과 의원은 거의 전부 피부과를 신고한다.
+   * 게다가 `totalCount` 끼리 비교하므로 **표본 오차가 아예 없다.**
+   *
+   * 실측(2026-07-30): 이름에 '피부과' 가 든 의원 1,555곳 중 1,553곳(99.9%)이
+   * `dgsbjtCd=14`. 성형외과는 1,236곳 중 1,233곳(99.8%)이 `dgsbjtCd=08`.
+   */
+  const countOnly = async (params: Record<string, string | number>): Promise<number | undefined> => {
+    const p = await probeEndpoints(
+      http, serviceKey, [working.endpoint], { ...params, pageNo: 1, numOfRows: 1 }, logger,
+    );
+    return p.found?.parsed?.totalCount;
+  };
+
+  /** 이름에 키워드가 든 기관 중 이 코드를 신고한 비율. 이보다 낮으면 코드가 틀렸다. */
+  const NAME_TO_CODE_MIN = 0.9;
+
+  /** 코드가 틀렸을 때 올바른 코드를 같은 방법으로 찾아 준다. */
+  const discoverByName = async (keyword: string, withName: number): Promise<string> => {
+    const found: Array<{ code: string; ratio: number; n: number }> = [];
+    for (let n = 0; n <= 30; n++) {
+      const code = String(n).padStart(2, "0");
+      const hit = await countOnly({ clCd: HIRA_CODES.cl_clinic, yadmNm: keyword, dgsbjtCd: code });
+      if (hit !== undefined && hit / withName >= NAME_TO_CODE_MIN) found.push({ code, ratio: hit / withName, n: hit });
+    }
+    if (found.length === 0) return "    탐색 결과: 00~30 중 기준을 넘는 코드가 없습니다.";
+    found.sort((a, b) => b.ratio - a.ratio);
+    const lines = found.map(
+      (f) => `      dgsbjtCd=${f.code} → ${f.n}/${withName} (${(f.ratio * 100).toFixed(1)}%)`,
+    );
+    return ["    탐색 결과 (이름 → 코드, 전수 카운트):", ...lines].join("\n");
+  };
+
+  /** @returns 결정적으로 판정했으면 true. 이름 필터를 지원하지 않으면 false (휴리스틱으로 넘어간다). */
+  const verifyCodeByName = async (industry: "derm" | "plastic"): Promise<boolean> => {
+    const keyword = NAME_KEYWORD[industry];
+    const code = String(HIRA_PARAMS[industry]["dgsbjtCd"]);
+    const withName = await countOnly({ clCd: HIRA_CODES.cl_clinic, yadmNm: keyword });
+    if (withName === undefined || withName === 0) return false; // yadmNm 필터 미지원
+
+    const withBoth = await countOnly({ clCd: HIRA_CODES.cl_clinic, yadmNm: keyword, dgsbjtCd: code });
+    if (withBoth === undefined) return false;
+
+    const ratio = withBoth / withName;
+    const ok = ratio >= NAME_TO_CODE_MIN;
+    checks.push({
+      name: `진료과목 코드 (${industry}: dgsbjtCd=${code})`,
+      status: ok ? "pass" : "fail",
+      detail: ok
+        ? `**확정** — 이름이 '${keyword}' 인 의원의 ${(ratio * 100).toFixed(1)}% 가 이 코드를 신고했습니다. ` +
+          `전수 카운트 비교라 표본 오차가 없습니다.`
+        : `이름이 '${keyword}' 인 의원 중 ${(ratio * 100).toFixed(1)}% 만 이 코드를 신고했습니다. ` +
+          `기준 ${NAME_TO_CODE_MIN * 100}% 미달 — 코드가 틀렸습니다.`,
+      evidence:
+        `이름에 '${keyword}' 포함 의원 ${withName}곳 중 dgsbjtCd=${code} 신고 ${withBoth}곳` +
+        (ok ? "" : `\n${await discoverByName(keyword, withName)}`),
+    });
+    return true;
+  };
+
+  const decided: Record<string, boolean> = {};
+  for (const industry of ["derm", "plastic"] as const) {
+    decided[industry] = await verifyCodeByName(industry);
+    // 판정 방법과 무관하게 업종별 실응답을 녹화한다 (회귀 테스트 입력).
+    if (decided[industry]) {
+      const s = await sampleNames(HIRA_PARAMS[industry]);
+      if (s.body) recordFixture(fixtureDir, `hira-getHospBasisList-${industry}`, s.body);
+    }
+  }
+
+  // 대조군: 진료과목 필터 없이 의원 전체 (역방향 검증이 불가능할 때의 폴백)
   const control = await sampleNames({ clCd: HIRA_CODES.cl_clinic });
   checks.push({
     name: "대조군 표본",
@@ -441,8 +547,11 @@ export async function verifyHira(options: VerifyOptions): Promise<AdapterVerific
     );
   };
 
-  // 진료과목 코드: 대조군 대비 상승도로 판정
+  // 진료과목 코드 폴백: 대조군 대비 상승도로 판정.
+  // ❗ 역방향(이름 → 코드) 검증이 성공했으면 **돌리지 않는다.** 이 휴리스틱은 신고가
+  //    널리 퍼진 과목에서 틀린 답을 내므로, 확정된 결과 옆에 두면 혼란만 준다.
   for (const industry of ["derm", "plastic"] as const) {
+    if (decided[industry]) continue;
     const keyword = NAME_KEYWORD[industry];
     const other = industry === "derm" ? "성형외과" : "피부과";
     const s = await sampleNames(HIRA_PARAMS[industry]);
@@ -512,13 +621,29 @@ export async function verifyFtc(options: VerifyOptions): Promise<AdapterVerifica
   const probe = await probeEndpoints(http, serviceKey, FTC_ENDPOINT_CANDIDATES, { pageNo: 1, numOfRows: 30 }, logger);
 
   if (!probe.found) {
+    // ❗ 음성 대조군. 존재하지 않는 것이 확실한 경로를 함께 두드려 본다.
+    //    포털이 미등록 서비스와 잘못된 경로에 **똑같은 응답**을 준다면, 후보들의 실패는
+    //    "경로가 틀렸다" 는 근거가 되지 못한다. 그 사실을 감추면 있지도 않은 단서를
+    //    쫓아 경로를 계속 추측하게 된다.
+    const controlPath = "https://apis.data.go.kr/1130000/NoSuchServiceXYZ/getNothing";
+    const controlProbe = await probeEndpoints(http, serviceKey, [controlPath], { pageNo: 1, numOfRows: 1 }, logger);
+    const controlError = controlProbe.attempts[0]?.error ?? "(응답 없음)";
+    const sameAsControl = probe.attempts.every((a) => a.error === controlError);
+
     checks.push({
       name: "엔드포인트",
       status: "fail",
-      detail:
-        "후보 중 어느 것도 정상 응답하지 않았습니다. 공정위 가맹정보 API 는 데이터셋별로 경로가 다르므로, " +
-        "data.go.kr 활용신청 후 받은 가이드 문서의 요청주소를 ftc.ts 의 ENDPOINTS 에 넣으세요.",
-      evidence: probe.attempts.map((a) => `${a.endpoint}\n  → ${a.error}`).join("\n"),
+      detail: sameAsControl
+        ? "후보 중 어느 것도 정상 응답하지 않았습니다. **다만 이 응답은 진단에 쓸 수 없습니다** — " +
+          "존재하지 않는 것이 확실한 대조 경로가 똑같은 응답을 돌려줍니다. " +
+          "경로 오류·활용신청 미승인·서비스 장애를 구분할 수 없으므로 경로 추측은 무의미합니다. " +
+          "data.go.kr 활용신청 상세의 가이드 문서에서 요청주소를 확인해 ftc.ts 의 ENDPOINTS 에 넣으세요."
+        : "후보 중 어느 것도 정상 응답하지 않았습니다. 공정위 가맹정보 API 는 데이터셋별로 경로가 다르므로, " +
+          "data.go.kr 활용신청 후 받은 가이드 문서의 요청주소를 ftc.ts 의 ENDPOINTS 에 넣으세요.",
+      evidence:
+        probe.attempts.map((a) => `${a.endpoint}\n  → ${a.error}`).join("\n") +
+        `\n[음성 대조군] ${controlPath}\n  → ${controlError}` +
+        (sameAsControl ? "\n  ⇒ 후보들과 응답이 동일하다. 이 상태 코드는 정보를 담고 있지 않다." : ""),
     });
     return { adapter: "ftc_franchise", checks, status: "fail" };
   }

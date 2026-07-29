@@ -7,10 +7,13 @@ dist/
 .env.local
 .env.*.local
 
-# 스파이크 산출물 (실데이터 · 커밋 금지)
+# 스파이크 산출물
 out/
-fixtures/http/
 fixtures/goldset.csv
+
+# fixtures/http/ 는 **커밋한다.** 검증된 어댑터의 실응답을 회귀 테스트 입력으로 쓴다
+# (설계서 11장: 가짜 응답만으로 완료 처리하지 않는다). recordFixture 가 항목을 5건으로
+# 잘라 저장하므로 diff 를 읽을 수 있고, 공개 데이터라 재배포도 허용돼 있다.
 
 .DS_Store
 Thumbs.db

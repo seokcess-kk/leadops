@@ -26,7 +26,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 493 단위 + 162 DB 테스트
+pnpm verify               # typecheck + 508 단위 + 162 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -139,13 +139,28 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 | 어댑터 | 상태 | 남은 일 |
 |---|---|---|
 | `MockSourceAdapter` | 해당 없음 | — |
-| `HiraHospitalAdapter` | **부분 검증** | 경로는 401 응답으로 확인됨. 필드명·진료과목 코드값은 실키 필요 |
-| `FtcFranchiseAdapter` | **미검증** | 후보 경로 전부 500. 가이드 문서의 요청주소 필요 |
+| `HiraHospitalAdapter` | ✅ **검증됨** (2026-07-30) | 없음. 경로·필드·코드값 전부 실응답으로 확인, fixture 회귀 테스트 있음 |
+| `FtcFranchiseAdapter` | ❌ **미검증 · 진단 불가** | 후보 전부 500 인데 **음성 대조군도 같은 500** — 경로 추측이 무의미하다. 가이드 문서의 요청주소가 필요 |
 | `NaverSearchAdapter` | **미검증** | 자격증명 없음. 응답 fixture 는 개발자 문서 기반 추정. API HUB 이관 여부도 미확인(R2-04) |
 | RSS·Atom 피드 | **검증됨** | 키 불필요. RSS 2.0 · Atom · RDF 파싱 테스트 통과 |
 
-`pnpm spike verify` 가 엔드포인트 후보를 탐색하고, 코드값을 경험적으로 검사하고,
-실제 응답을 fixture 로 녹화한다. 절차는 [docs/06-adapter-verification.md](docs/06-adapter-verification.md).
+`pnpm spike verify` 가 엔드포인트 후보를 탐색하고, 코드값을 검사하고, 실제 응답을
+`fixtures/http/` 에 fixture 로 녹화한다. 절차는
+[docs/06-adapter-verification.md](docs/06-adapter-verification.md).
+
+### 실측된 모집단 (2026-07-30)
+
+| 업종 | 진료과목 신고 기준 | 기관명 기준 |
+|---|---:|---:|
+| 피부과 | 16,987 | **1,555** |
+| 성형외과 | 4,883 | **1,236** |
+| 치과 | 19,398 | — |
+
+> ⚠️ **두 숫자의 차이가 제품 결정을 바꾼다.** `dgsbjtCd=14` 로 수집하면 피부 시술을
+> 겸하는 일반의원까지 16,987곳이 들어온다(전체 의원의 45%). "피부과" 를 표방하는
+> 전문 의원만 원한다면 1,555곳이다. **어느 쪽을 대상으로 할지는 미결이다.**
+
+소진 곡선(총계 41,268 기준): 210건/일이면 **197 영업일 ≈ 9개월**.
 
 ## 파이프라인 (Phase 4 완료 구간)
 
