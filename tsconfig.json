@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@leadops/core": ["packages/core/src/index.ts"],
+      "@leadops/core/*": ["packages/core/src/*"],
+      "@leadops/http": ["packages/http/src/index.ts"],
+      "@leadops/http/*": ["packages/http/src/*"],
+      "@leadops/adapters": ["packages/adapters/src/index.ts"],
+      "@leadops/adapters/*": ["packages/adapters/src/*"],
+      "@leadops/db": ["packages/db/src/index.ts"],
+      "@leadops/db/*": ["packages/db/src/*"],
+      "@leadops/pipeline": ["packages/pipeline/src/index.ts"],
+      "@leadops/pipeline/*": ["packages/pipeline/src/*"],
+      "@leadops/worker": ["apps/worker/src/loop.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "**/dist"]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "leadops",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "pnpm typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:db": "vitest run --config vitest.pg.config.ts",
+    "verify": "pnpm typecheck && pnpm test && pnpm test:db",
+    "db:up": "docker run -d --name leadops-pg -e POSTGRES_PASSWORD=leadops -e POSTGRES_DB=leadops -p 55432:5432 postgres:17-alpine",
+    "db:down": "docker rm -f leadops-pg",
+    "db:psql": "docker exec -it leadops-pg psql -U postgres",
+    "db:migrate": "tsx packages/db/src/cli.ts",
+    "spike": "tsx apps/spike/src/index.ts",
+    "worker": "tsx apps/worker/src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
