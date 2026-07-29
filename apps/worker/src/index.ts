@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { hostname } from "node:os";
-import { createSourceAdapters } from "@leadops/adapters";
+import { createSearchAdapter, createSourceAdapters } from "@leadops/adapters";
 import { configError, createLogger, getEnv, Industry, LeadOpsError, type Industry as IndustryT } from "@leadops/core";
 import { createHttpClient, RobotsGate, userAgentToken } from "@leadops/http";
 import { startRun } from "@leadops/pipeline";
@@ -111,7 +111,13 @@ async function main(): Promise<number> {
   });
 
   const workerId = `${hostname()}:${process.pid}`;
-  const worker = new Worker({ sql, logger, adapters, http, robots, workerId });
+  const search = createSearchAdapter(env, http);
+  if (!search) {
+    logger.info("ors.disabled", {
+      note: "FEATURE_ORS=off — 검색 분석 없이 채널 활성도 중심 축소 파이프라인으로 동작합니다.",
+    });
+  }
+  const worker = new Worker({ sql, logger, adapters, http, robots, search, workerId });
 
   // 안전 종료: 진행 중인 잡을 끝낸 뒤 멈춘다. 강제 종료는 lease 만료로 reaper 가 회수한다.
   let shuttingDown = false;

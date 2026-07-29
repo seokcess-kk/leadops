@@ -1,8 +1,10 @@
+import { channelStage } from "./channel";
 import { collectStage } from "./collect";
 import { contactPagesStage } from "./contactPages";
 import { excludeStage } from "./exclude";
 import { homepageStage } from "./homepage";
 import { normalizeStage } from "./normalize";
+import { searchStage } from "./search";
 import type { StageHandler } from "./types";
 
 export * from "./types";
@@ -11,12 +13,15 @@ export * from "./normalize";
 export * from "./exclude";
 export * from "./homepage";
 export * from "./contactPages";
+export * from "./channel";
+export * from "./search";
 
 /**
  * 스테이지 레지스트리.
  *
- * Phase 3 범위: 수집 → 정규화 → 기본 제외 → 홈페이지 판별 → 연락처 페이지.
- * 이후 단계(검색·채널·경쟁사·점수)는 Phase 4~5 에서 여기에 추가한다.
+ * Phase 4 범위: 수집 → 정규화 → 기본 제외 → 홈페이지 판별 → 연락처 페이지
+ *                → 채널 활성도 · 검색 분석(ORS).
+ * 이후 단계(경쟁사·점수·추천)는 Phase 5 에서 여기에 추가한다.
  */
 export const STAGES: readonly StageHandler[] = [
   collectStage,
@@ -24,6 +29,8 @@ export const STAGES: readonly StageHandler[] = [
   excludeStage,
   homepageStage,
   contactPagesStage,
+  channelStage,
+  searchStage,
 ];
 
 export function stageByName(name: string): StageHandler {

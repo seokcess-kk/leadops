@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "dependencies": {
     "@leadops/core": "workspace:*",
-    "@leadops/http": "workspace:*"
+    "@leadops/http": "workspace:*",
+    "fast-xml-parser": "^5.10.1"
   }
 }

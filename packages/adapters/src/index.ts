@@ -5,3 +5,5 @@ export * from "./ftc";
 export * from "./mock";
 export * from "./registry";
 export * from "./verify";
+export * from "./feed";
+export * from "./search";

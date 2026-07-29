@@ -3,8 +3,8 @@
 마케팅 에이전시 내부용 리드 발굴 도구. 검색 수요는 있으나 검색 결과물·콘텐츠 점유가
 경쟁사보다 부족한 업체를 찾아 영업 가치가 높은 리드만 선별한다.
 
-> **현재 상태: Phase 3 완료 (홈페이지 판별·연락처 페이지 후보)**
-> 설계서 `docs/00-plan.md` v3 기준. 검색 분석부터는 아직 없다.
+> **현재 상태: Phase 4 완료 (채널 활성도·검색 분석 ORS)**
+> 설계서 `docs/00-plan.md` v3 기준. 경쟁사·점수부터는 아직 없다.
 
 ## 문서
 
@@ -26,7 +26,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 398 단위 + 139 DB 테스트
+pnpm verify               # typecheck + 493 단위 + 162 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -47,10 +47,12 @@ pnpm spike sample --per-industry 30 --seed 42   # 골드셋 라벨링용 CSV
 ```
 packages/core       도메인 타입 · 환경변수 검증 · 에러 · PII 마스킹 · 소스 레지스트리 · 로거
 packages/http       SSRF 방어 · robots.txt 파서·게이트 · rate limit · 백오프 · HttpClient
-packages/adapters   SourceAdapter 계약 · HIRA · 공정위 · Mock · 팩토리
+packages/adapters   SourceAdapter · SearchAdapter 계약 · HIRA · 공정위 · 네이버 검색 ·
+                    RSS·Atom 피드 파서 · Mock · 팩토리
 packages/db         마이그레이션 · RLS · RPC · 테스트 하네스
 packages/pipeline   정규화 · 중복 제거 · 제외 규칙 · HTML 스캐너 · 도메인 분류 ·
-                    공식 홈페이지 판정 · 연락처 페이지 탐지 · 스테이지 · 오케스트레이션
+                    공식 홈페이지 판정 · 연락처 페이지 탐지 · 채널 발견 · 활성도 산출 ·
+                    키워드 생성 · ORS 산출 · 쿼터 가드 · 스테이지 · 오케스트레이션
 apps/worker         잡 루프 (fencing · heartbeat · 안전 종료)
 apps/spike          Phase 0 스파이크 CLI (DB 없이 동작)
 ```
@@ -67,6 +69,7 @@ apps/spike          Phase 0 스파이크 CLI (DB 없이 동작)
 | `0005_grants` | 최소 권한 GRANT · 함수 실행권 |
 | `0006_seed` | 설정·소스 레지스트리 시드 |
 | `0007_raw_candidates` | 수집 원본 (7일 보관) |
+| `0008_channel_saturation` | 피드 포화 표시 · ORS 분모 0 허용 |
 
 **최초 admin 부트스트랩** (배포 runbook): DB 소유자가 직접 승격한다.
 ```sql
@@ -116,6 +119,14 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 | HTTP 계층 없이 홈페이지 판별을 "완료" 로 기록할 수 없다 | `requireFetching()` — `configuration_error` |
 | `noindex` 는 차단 사유가 아니다 (색인 지시일 뿐) | 같은 파일 |
 | 키가 없으면 mock 으로 조용히 폴백하지 않고 부팅에 실패한다 | `packages/core/src/env.ts` |
+| **쿼터는 호출 전에 선점한다** — 재시도가 이중 계상되지 않고 동시 선점이 한도를 넘지 않는다 | `packages/pipeline/src/quota.ts` · `phase4.pg.test.ts` |
+| ORS 분모가 0 이면 0 이 아니라 **null** (측정 불가와 측정값 0 을 구분) | `packages/pipeline/src/ors.ts` |
+| 브랜드·비브랜드 ORS 를 합산하지 않는다 | `search_aggregates.keyword_kind` |
+| 공유 호스트(`blog.naver.com`)의 남의 글을 공식으로 오인하지 않는다 | 경로까지 대조 — `ors.test.ts` |
+| 네이버 응답이 손상되면 "0건"이 아니라 에러다 (fail-open 금지) | `packages/adapters/src/search.ts` |
+| 피드 파서는 **본문을 반환하지 않는다** (발행 시각·제목만) | `packages/adapters/src/feed.ts` |
+| 추측한 피드 주소로 요청을 보내지 않는다 (브런치·유튜브 핸들) | `packages/pipeline/src/channels.ts` |
+| 검색 어댑터가 없으면 실패가 아니라 **건너뛴다** (축소 파이프라인이 1급 경로) | `stages/search.ts` |
 | `NODE_ENV=production` 에서 mock 어댑터는 부팅을 막는다 | 같은 파일 |
 | ORS(네이버)는 자격증명 없이 켤 수 없다 | 같은 파일 |
 | 승인되지 않은 데이터 소스는 어댑터가 실행을 거부한다 | `packages/core/src/sourceRegistry.ts` |
@@ -130,11 +141,13 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 | `MockSourceAdapter` | 해당 없음 | — |
 | `HiraHospitalAdapter` | **부분 검증** | 경로는 401 응답으로 확인됨. 필드명·진료과목 코드값은 실키 필요 |
 | `FtcFranchiseAdapter` | **미검증** | 후보 경로 전부 500. 가이드 문서의 요청주소 필요 |
+| `NaverSearchAdapter` | **미검증** | 자격증명 없음. 응답 fixture 는 개발자 문서 기반 추정. API HUB 이관 여부도 미확인(R2-04) |
+| RSS·Atom 피드 | **검증됨** | 키 불필요. RSS 2.0 · Atom · RDF 파싱 테스트 통과 |
 
 `pnpm spike verify` 가 엔드포인트 후보를 탐색하고, 코드값을 경험적으로 검사하고,
 실제 응답을 fixture 로 녹화한다. 절차는 [docs/06-adapter-verification.md](docs/06-adapter-verification.md).
 
-## 파이프라인 (Phase 3 완료 구간)
+## 파이프라인 (Phase 4 완료 구간)
 
 ```
 collect          어댑터 → raw_candidates       (업종당 잡 1개)
@@ -143,9 +156,11 @@ normalize        raw → companies + 관측 이력    (중복 제거 · 변경 �
   ↓
 exclude_basic    폐업·휴업·대형·가맹100+ 제외
   ↓
-homepage_detect  홈페이지 1회 fetch → 공식 판정 + 연락처 페이지 후보
+homepage_detect  홈페이지 1회 fetch → 공식 판정 + 연락처 후보 + 공식 채널
   ↓
-contact_pages    게이트 강제 · 공유 본문 강등 · 커버리지 집계 (네트워크 요청 없음)
+  ├─ contact_pages    게이트 강제 · 공유 본문 강등 · 커버리지 집계 (요청 0회)
+  ├─ channel_analyze  공개 RSS·Atom 피드 → 발행량·주기·콘텐츠 성격
+  └─ search_analyze   네이버 Open API 4채널 → ORS  (FEATURE_ORS=off 면 건너뜀)
 ```
 
 각 스테이지는 **멱등**하다. 선행 스테이지가 terminal 이 되면 다음 스테이지가 자동으로
@@ -193,12 +208,59 @@ enqueue 된다(잡 큐에는 의존 관계 개념이 없으므로 오케스트�
 강등한다. (2곳은 강등하지 않는다 — 한 업체가 `example.co.kr` · `example.kr` 로 같은 사이트를
 서비스하는 것은 정상이다.)
 
+### 채널 활성도 — 네이버 없이 성립하는 축
+
+설계서 3절이 "ORS 없이 성립하는 축소 파이프라인을 1급 경로로 유지한다" 고 정한 축이 이것이다.
+그래서 **네이버 승인 여부와 무관하게** 동작해야 하고, 실제로 외부 API 키를 하나도 쓰지 않는다.
+
+- 채널은 **검색으로 찾지 않는다.** 공식으로 판정된 홈페이지가 스스로 링크한 주소만 인정한다.
+  검색으로 찾으면 동명이인·팬페이지를 공식으로 오인하고 쿼터도 쓴다. 링크는 `homepage_detect`
+  가 이미 받아 둔 것이라 **추가 요청이 0회**다.
+- 유튜브는 Data API 대신 **공개 RSS 피드**(`feeds/videos.xml`)를 쓴다. 키도 쿼터도 필요 없고
+  "최근 발행이 없다" 는 신호를 그대로 준다. 설계서 4.1 은 `channels.list`(1 unit)를 적었지만
+  활성도 산출에는 불필요하다.
+- 판정은 **낮은 쪽에서만 정확하면 된다.** 찾는 것이 "최근에 아무것도 안 올린 곳" 이므로,
+  피드가 관측 창을 못 덮으면 `feed_saturated` 로 표시하고 카운트를 **하한값**으로 다룬다.
+
+분석할 수 없는 채널(인스타그램·유튜브 핸들 주소·브런치)은 **사유를 남긴다.** 추측한 피드
+주소로 요청을 보내지 않는다.
+
+### ORS — 배점 0 의 shadow feature
+
+`FEATURE_ORS` 는 3-state 다. 기본값 `off` 에서는 어댑터가 **아예 로드되지 않고**,
+`search_analyze` 는 실패가 아니라 건너뛴다.
+
+| 값 | 전제 조건 | ORS 산출 | 배점 |
+|---|---|---:|---:|
+| `off` (기본) | 없음 | ❌ | 0 |
+| `shadow` | `source_registry.approved` + 서면 근거 | ✅ 기록만 | 0 |
+| `on` | 위 + Phase 4 확증 검증(n=240) 통과 | ✅ | 25 |
+
+분모는 채널마다 `min(30, total, 실제 회수 건수)`다. 고정 30 을 쓰면 결과가 10건뿐인 채널을
+부당하게 낮게 평가하고(R2-09), 보지 못한 결과를 분모에 넣으면 **없는 공백을 만들어 낸다.**
+분모가 0 이면 ORS 는 0 이 아니라 **정의되지 않음**(null)이다 — 아무도 콘텐츠가 없는 키워드는
+점유 공백을 재는 데 쓸 수 없다.
+
+브랜드와 비브랜드는 **합산하지 않는다.** 상호로 검색하면 당연히 본인 콘텐츠가 잡히므로
+섞으면 점유율이 부풀려진다.
+
+### 쿼터 가드
+
+호출한 뒤에 세지 않고 **호출하기 전에 원장에 적는다.** 워커가 호출 직후 죽으면 "썼는데 세지
+않은" 호출이 생기고, 재시도하면 실제 사용량이 한도를 넘는다. 과다 계상은 하루치 여유를 조금
+잃을 뿐이지만 과소 계상은 계정 차단으로 이어진다 — 안전한 쪽으로 틀린다.
+
+`cost_ledger.entry_key` 가 unique 라 잡 재시도가 쿼터를 갉아먹지 않고, provider 단위 advisory
+lock 으로 동시 선점이 한도를 넘지 못한다. 한도에 닿으면 그 자리에서 멈추고 실행을 `partial`
+로 끝낸다 — 조용히 줄여서 계속하지 않는다.
+
 ## 아직 없는 것
 
-검색 분석(ORS) · 채널 분석 · 경쟁사 선정 · 점수 계산 · 추천 · 검수 API · 대시보드.
+경쟁사 선정 · 점수 계산 · 추천 · 검수 API · 대시보드 연동.
 
-다음은 Phase 4(검색·채널 분석)다. 다만 ORS 는 설계서 결론 C 에 따라 **네이버 서면 승인 전까지
-배점 0(shadow)** 이므로, 채널 분석(RSS·유튜브)부터 시작하는 편이 실익이 크다.
+다음은 Phase 5(경쟁사·3축 점수·추천)다. 다만 **Phase 2~4 의 완료 기준이 아직 미측정**이다 —
+골드셋 120건이 없어 M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) ·
+M6(ORS 산출 가능률 ≥90%)를 재지 못했다. 어댑터 검증 2건이 그 앞을 막고 있다.
 
 ## 스크립트
 

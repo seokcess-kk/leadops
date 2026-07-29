@@ -1,6 +1,6 @@
 import { LeadOpsError, type Logger } from "@leadops/core";
 import { advanceAttempt, stageByName, type StageContext, type StageResult } from "@leadops/pipeline";
-import type { SourceAdapter } from "@leadops/adapters";
+import type { SearchAdapter, SourceAdapter } from "@leadops/adapters";
 import type { HttpClient, RobotsGate } from "@leadops/http";
 import type { Sql } from "postgres";
 
@@ -30,6 +30,8 @@ export interface WorkerOptions {
    */
   http?: HttpClient | undefined;
   robots?: RobotsGate | undefined;
+  /** 검색 어댑터. `FEATURE_ORS=off` 면 없는 것이 정상이다. */
+  search?: SearchAdapter | undefined;
   /** 이 워커의 식별자. 로그와 fencing 에 쓰인다. */
   workerId: string;
   leaseSeconds?: number;
@@ -57,6 +59,7 @@ export class Worker {
   readonly #adapters: readonly SourceAdapter[];
   readonly #http: HttpClient | undefined;
   readonly #robots: RobotsGate | undefined;
+  readonly #search: SearchAdapter | undefined;
   readonly #workerId: string;
   readonly #leaseSeconds: number;
   readonly #heartbeatMs: number;
@@ -72,6 +75,7 @@ export class Worker {
     this.#adapters = options.adapters;
     this.#http = options.http;
     this.#robots = options.robots;
+    this.#search = options.search;
     this.#workerId = options.workerId;
     this.#leaseSeconds = options.leaseSeconds ?? 120;
     this.#heartbeatMs = options.heartbeatMs ?? 30_000;
@@ -174,6 +178,7 @@ export class Worker {
       adapters: this.#adapters,
       http: this.#http,
       robots: this.#robots,
+      search: this.#search,
     };
     return handler.run(ctx, job.payload);
   }

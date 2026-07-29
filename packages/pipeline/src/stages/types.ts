@@ -1,5 +1,5 @@
 import { configError, type Logger } from "@leadops/core";
-import type { SourceAdapter } from "@leadops/adapters";
+import type { SearchAdapter, SourceAdapter } from "@leadops/adapters";
 import type { HttpClient, RobotsGate } from "@leadops/http";
 import type { Sql } from "postgres";
 
@@ -26,6 +26,11 @@ export interface StageContext {
   http?: HttpClient | undefined;
   /** robots.txt 게이트. `http` 를 쓰는 스테이지는 반드시 함께 받아야 한다. */
   robots?: RobotsGate | undefined;
+  /**
+   * 검색 어댑터. `FEATURE_ORS=off` 면 **없는 것이 정상**이다.
+   * 없으면 `search_analyze` 가 실패하지 않고 건너뛴다 (설계서 3절 축소 파이프라인).
+   */
+  search?: SearchAdapter | undefined;
 }
 
 /** `http`·`robots` 가 준비된 컨텍스트. 없으면 스테이지를 시작하지 않는다. */

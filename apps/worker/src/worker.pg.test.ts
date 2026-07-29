@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Worker } from "./loop";
 
 /**
- * Phase 3 E2E — 실행 생성부터 연락처 페이지 집계까지 5개 스테이지 전 구간.
+ * Phase 4 E2E — 실행 생성부터 채널·검색 분석까지 7개 스테이지 전 구간.
  *
  * ❗ 워커는 **실제 leadops_worker 로그인 역할**로 접속한다.
  *    소유자 커넥션으로 돌리면 권한 모델이 검증되지 않는다.
@@ -61,7 +61,7 @@ afterAll(async () => {
   await db?.close();
 });
 
-describe("전체 파이프라인 (collect → normalize → exclude_basic → homepage_detect → contact_pages)", () => {
+describe("전체 파이프라인 — 7개 스테이지", () => {
   it("❗ 실행을 만들고 큐를 비우면 업체가 적재된다", async () => {
     const { runId, attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
@@ -72,8 +72,8 @@ describe("전체 파이프라인 (collect → normalize → exclude_basic → ho
     });
 
     const handled = await makeWorker().drain(50);
-    // collect 2 + normalize 1 + exclude_basic 1 + homepage_detect 1 + contact_pages 1
-    expect(handled).toBe(6);
+    // collect 2 + normalize·exclude_basic·homepage_detect·contact_pages·channel_analyze·search_analyze 각 1
+    expect(handled).toBe(8);
 
     const [rawRow] = await db.owner<{ n: string }[]>`
       select count(*)::text as n from raw_candidates where attempt_id = ${attemptId}
@@ -104,6 +104,24 @@ describe("전체 파이프라인 (collect → normalize → exclude_basic → ho
     expect(byStage.get("exclude_basic")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
     expect(byStage.get("homepage_detect")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
     expect(byStage.get("contact_pages")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("channel_analyze")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("search_analyze")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+  });
+
+  it("❗ 검색 어댑터가 없어도 실행이 성공으로 끝난다 (ORS 없는 축소 파이프라인)", async () => {
+    // 이 워커는 search 어댑터를 주입하지 않는다 = FEATURE_ORS=off 와 같은 상태다.
+    const [row] = await db.owner<Array<{ n: string }>>`select count(*)::text as n from search_aggregates`;
+    expect(row!.n).toBe("0");
+
+    const [run] = await db.owner<Array<{ status: string }>>`
+      select status from runs where run_date = '2026-12-01'::date
+    `;
+    expect(run!.status).toBe("succeeded");
+  });
+
+  it("공식 사이트가 없으므로 분석할 공식 채널도 없다", async () => {
+    const [row] = await db.owner<Array<{ n: string }>>`select count(*)::text as n from channels`;
+    expect(row!.n).toBe("0");
   });
 
   it("❗ 도달할 수 없는 홈페이지는 unavailable 로 남고 실행을 실패시키지 않는다", async () => {

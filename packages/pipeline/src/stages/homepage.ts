@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { discoverChannels, type DiscoveredChannel } from "../channels";
 import { detectContactPages, type ContactCandidate } from "../contactPages";
 import { scanHtml } from "../html";
 import { judgeOfficial, unavailableVerdict, type OfficialVerdict } from "../official";
@@ -138,6 +139,8 @@ export const homepageStage: StageHandler = {
 interface Inspection {
   verdict: OfficialVerdict;
   candidates: readonly ContactCandidate[];
+  /** 공식 채널 (블로그·유튜브·SNS·플레이스). 같은 HTML 의 링크에서 나온다. */
+  channels: readonly DiscoveredChannel[];
   robotsAllowed: boolean | null;
   httpStatus: number | null;
   hasNoindex: boolean;
@@ -158,6 +161,7 @@ async function inspect(
 ): Promise<Inspection> {
   const empty: Omit<Inspection, "verdict"> = {
     candidates: [],
+    channels: [],
     robotsAllowed: null,
     httpStatus: null,
     hasNoindex: false,
@@ -200,6 +204,8 @@ async function inspect(
     const res = await ctx.http.get(target.canonical_url, { acceptContentTypes: HTML_CONTENT_TYPES });
     const scan = scanHtml(res.body);
     const candidates = detectContactPages(scan.links, res.finalUrl);
+    // 채널도 같은 링크 목록에서 나온다 — 추가 요청 0회 (설계서 4.1 쿼터 절감).
+    const channels = discoverChannels(scan.links, res.finalUrl);
     const verdict = judgeOfficial({
       companyName: target.name,
       domain: target.domain,
@@ -215,6 +221,7 @@ async function inspect(
     return {
       verdict,
       candidates,
+      channels,
       robotsAllowed: true,
       httpStatus: res.status,
       hasNoindex: scan.hasNoindex,
@@ -256,9 +263,18 @@ async function persist(ctx: FetchingStageContext, target: Target, outcome: Inspe
         observed_at = now()
     `;
 
-    // 게이트: 공식으로 인정된 사이트의 후보만 남긴다 (설계서 스테이지 6 선행 조건).
+    // 게이트: 공식으로 인정된 사이트의 것만 남긴다 (설계서 스테이지 6·7 선행 조건).
+    // 공식이 아닌 페이지가 링크한 블로그는 그 업체의 공식 채널이 아니다.
     const keep = verdict.status === "confirmed" || verdict.status === "likely";
-    if (!keep || outcome.candidates.length === 0) return;
+    if (!keep) return;
+
+    for (const channel of outcome.channels) {
+      await tx`
+        insert into channels (company_id, type, url)
+        values (${target.company_id}, ${channel.type}::channel_type, ${channel.url})
+        on conflict (company_id, type, url) do nothing
+      `;
+    }
 
     for (const candidate of outcome.candidates) {
       await tx`

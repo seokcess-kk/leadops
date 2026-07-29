@@ -1,4 +1,5 @@
-import { CompanyStatus, policyViolation, type Industry, type RawCandidate, type UniverseCount } from "@leadops/core";
+import type { SearchAdapter, SearchHit, SearchProvider, SearchResult } from "./search";
+import { CompanyStatus, configError, policyViolation, type Industry, type RawCandidate, type UniverseCount } from "@leadops/core";
 import type { FetchCandidatesOptions, SourceAdapter } from "./types";
 
 /**
@@ -93,4 +94,51 @@ export function makeMockCandidate(industry: Industry, index: number): RawCandida
     //    이메일은 검수자 수동 입력으로만 들어온다 (설계서 결론 A).
     raw: { mock: true, index },
   };
+}
+
+/**
+ * 목업 검색 어댑터.
+ *
+ * ORS 파이프라인을 자격증명 없이 끝까지 돌려 보기 위한 것이다.
+ * `NODE_ENV=production` 에서는 생성되지 않는다 — 가짜 ORS 가 실제 점수에 들어가면
+ * "검색 점유 공백" 판정이 통째로 허구가 된다.
+ */
+export class MockSearchAdapter implements SearchAdapter {
+  readonly sourceName = "naver_search";
+  readonly verifiedAgainstLiveApi = false;
+  readonly unitsPerCall = 1;
+
+  /** 키워드·채널별로 돌려줄 응답. 지정하지 않으면 규칙으로 만들어 낸다. */
+  readonly #canned: Map<string, SearchResult>;
+  #calls = 0;
+
+  constructor(canned: Iterable<[string, SearchResult]> = []) {
+    if (process.env["NODE_ENV"] === "production") {
+      throw configError("MockSearchAdapter 는 production 에서 사용할 수 없습니다");
+    }
+    this.#canned = new Map(canned);
+  }
+
+  get callCount(): number {
+    return this.#calls;
+  }
+
+  async search(provider: SearchProvider, keyword: string, display = 30): Promise<SearchResult> {
+    this.#calls++;
+    const canned = this.#canned.get(`${provider}|${keyword}`);
+    if (canned) return canned;
+
+    // 결정적 합성 응답. 같은 입력이면 같은 결과가 나와야 재실행 비교가 가능하다.
+    const seed = [...`${provider}${keyword}`].reduce((a, c) => a + c.charCodeAt(0), 0);
+    const total = seed % 7 === 0 ? 0 : (seed % 40) + 3;
+    const count = Math.min(total, display);
+    const hits: SearchHit[] = Array.from({ length: count }, (_, i) => ({
+      rank: i + 1,
+      title: `${keyword} 관련 글 ${i + 1}`,
+      link: `https://example-${provider}.test/${seed}/${i + 1}`,
+      description: `${keyword} 설명 ${i + 1}`,
+      publishedAt: new Date(Date.UTC(2026, 6, 1 + (i % 28))),
+    }));
+    return { provider, keyword, total, hits };
+  }
 }
