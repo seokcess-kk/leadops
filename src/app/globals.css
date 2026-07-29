@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────
+   leadops 디자인 토큰
+   The Verge 비주얼 언어의 재해석 — 데이터 검수·영업 관리용 절제 다크 UI.
+   규칙: 그림자·그라데이션·blur 금지. 위계는 1px 테두리와 단색 블록으로만.
+   ────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* 표면 */
+  --color-canvas: #131313;
+  --color-surface: #2d2d2d;
+  --color-subtle: #1b1b1b;
+
+  /* hazard 액센트 — 상태·중요도 표현 전용. 배경 워시 금지 */
+  --color-mint: #3cffd0;
+  --color-mint-dim: #309875;
+  --color-violet: #5200ff;
+  --color-violet-bright: #8b5cf6; /* 다크 캔버스 위 소형 텍스트용 보라 (#5200ff는 대비 부족) */
+  --color-violet-rule: #3d00bf;
+
+  /* 텍스트 */
+  --color-fg: #ffffff;
+  --color-fg-2: #949494;
+  --color-fg-3: #e9e9e9;
+  --color-ink: #131313; /* 민트·흰 블록 위 텍스트 */
+
+  /* 라인 — 기본 위계는 어두운 헤어라인, 흰색·민트는 강조 전용 */
+  --color-line: #2d2d2d;
+  --color-row: #232323;
+  --color-line-strong: rgba(255, 255, 255, 0.25);
+
+  /* 인터랙션 */
+  --color-hoverlink: #3860be;
+  --color-focus: #1eaedb;
+
+  /* 타이포 */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, sans-serif;
+  --font-display: "Anton", Impact, sans-serif;
+  /* 혼합 문자열("0건/60일" 등)의 한글 글리프는 Pretendard 로 폴백 */
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Pretendard Variable", monospace;
+
+  /* 라디우스 스케일: 2px 타자기 인풋 ↔ 12px 스트림 블록 ↔ 20px 카드 ↔ pill */
+  --radius-tag: 2px;
+  --radius-block: 12px;
+  --radius-card: 20px;
+}
+
+/* ── 베이스 ── */
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-mint);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 1px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 스크롤바 — 캔버스에 녹아드는 플랫 처리 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-surface) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-surface);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 드로어 진입 — 미세한 슬라이드만. 리프트·확대·강한 애니메이션 금지 */
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ── 시그니처 유틸리티 ── */
+
+/* 모노 대문자 라벨 — 섹션 라벨·타임스탬프·상태·실행 ID 전용. 소문자 모노 금지 */
+@utility mono-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-fg-2);
+}
+
+/* 디스플레이 숫자 — 워드마크·대형 KPI 전용. 버튼·테이블·폼 사용 금지 */
+@utility display-num {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 0.95; /* Anton 대체 규정: 0.80 + 0.15 */
+  letter-spacing: 0.02em;
+}
+
+/* 한글 라벨 — 모노는 영문 대문자 전용이므로 한글 라벨은 Pretendard 로 통일 */
+@utility k-label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--color-fg-2);
+}
+
+/* 링크 호버 — 색상 전환 단일 규칙 (#3860be), 밑줄 없음 */
+@utility link-hover {
+  transition: color 150ms ease;
+  &:hover {
+    color: var(--color-hoverlink);
+  }
+}
