@@ -20,6 +20,7 @@
 | [`docs/05-code-review-round2.md`](docs/05-code-review-round2.md) | codex 코드 리뷰 판정 — DB 계층 (11건) |
 | [`docs/06-adapter-verification.md`](docs/06-adapter-verification.md) | **어댑터 실 API 검증 절차** — 키 발급부터 플래그 전환까지 |
 | [`docs/07-runbook.md`](docs/07-runbook.md) | **운영 런북** — 배포·스케줄러·용량·개인정보 처리·백업/복구 |
+| [`docs/08-goldset-labeling.md`](docs/08-goldset-labeling.md) | **골드셋 라벨링 기준** — 열별 판정 기준·측정·Phase 0 게이트 |
 | `docs/critique/` | codex 원본 비평 보존 |
 
 ## 빠른 시작
@@ -619,7 +620,33 @@ UI 뿐이라 `types.ts` 의 `stageRank()` 가 다시 정렬한다 — 정렬하�
 
 다만 **Phase 2~5 의 완료 기준이 아직 미측정**이다 — 골드셋 120건이 없어
 M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) · M6(ORS 산출 가능률 ≥90%) ·
-점수 가중치 보정을 재지 못했다. `pnpm spike sample` 이 라벨링용 CSV 를 뽑아 준다.
+점수 가중치 보정을 재지 못했다.
+
+**측정 하네스는 준비돼 있다** (`pnpm spike measure`). 막힌 것은 코드가 아니라 입력이다:
+
+| 필요한 것 | 없으면 |
+|---|---|
+| 공공데이터포털 키 | 실표본을 못 뽑는다 (mock 도메인은 실재하지 않아 사람이 볼 페이지가 없다) |
+| 사람의 라벨링 10~16시간 | 지표가 전부 `미측정` |
+| 네이버 자격증명 + `FEATURE_ORS=shadow` | M7(**stop 게이트**)을 못 잰다 |
+
+```bash
+FEATURE_SOURCE=live pnpm spike sample --per-industry 30 --seed 42
+pnpm worker run --industry=derm,plastic,dental,franchise   # 같은 표본으로 파이프라인 실행
+#   → out/sample-seed42.csv 의 label_* 열을 채운다 (docs/08-goldset-labeling.md)
+pnpm spike measure --goldset out/sample-seed42.csv
+```
+
+하네스가 지키는 것:
+
+- **라벨이 없는 지표는 숫자를 만들지 않는다.** 빈 라벨을 `no` 로 읽으면 라벨링을 덜 한 것이
+  성적으로 바뀐다 — `미측정` 으로 보고한다
+- 비율은 **점추정 + Wilson 95% CI**. 가설검정을 하지 않는다 (설계서 9.1). 분모 0 은 0% 가
+  아니라 `—` 다
+- **판정은 `stop` 또는 `inconclusive` 뿐이다** (R2-06). 게이트 입력(M3b·M7)이 없으면
+  `미판정` — 라벨을 덜 채운 것이 "진행 허용" 이 되지 않는다. 종료 코드로도 구분한다
+- 판정을 **다시 계산하지 않는다.** DB 에 남은 파이프라인의 실제 출력을 읽는다 — 우리
+  알고리즘을 우리가 재구현해 비교하면 구현 두 개를 비교하는 것이다
 
 ## CI (`.github/workflows/ci.yml`)
 
@@ -662,4 +689,6 @@ M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) · 
 | `pnpm worker worker` | 큐를 계속 비운다 (상시 실행) |
 | `pnpm worker reap` / `cleanup` | lease 회수 / 보존기간 정리 |
 | `pnpm spike verify` | **어댑터 실 API 검증** (키 필요) — 엔드포인트 탐색·코드값 검사·fixture 녹화 |
-| `pnpm spike <cmd>` | 스파이크 CLI (`universe` / `sample` / `help`) |
+| `pnpm spike sample` | 골드셋 라벨링용 층화 표본 CSV |
+| `pnpm spike measure --goldset <csv>` | **골드셋 측정** — M1~M14 + Phase 0 판정 |
+| `pnpm spike <cmd>` | 스파이크 CLI (`universe` / `sample` / `measure` / `verify` / `help`) |

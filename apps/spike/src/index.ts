@@ -3,6 +3,7 @@ import { formatVerification, verifyAdapters } from "@leadops/adapters";
 import { configError, createLogger, getEnv, Industry, LeadOpsError, type Industry as IndustryT } from "@leadops/core";
 import { createHttpClient } from "@leadops/http";
 import { flagBool, flagNumber, flagString, parseArgs } from "./cli";
+import { formatMeasureReport, runMeasure } from "./measure";
 import { formatSampleReport, runSample } from "./sample";
 import { formatUniverseReport, runUniverse } from "./universe";
 
@@ -29,6 +30,11 @@ LeadOps 스파이크 CLI
 
   sample      골드셋 라벨링용 층화 표본을 뽑아 CSV 로 저장한다
 
+  measure     라벨링이 끝난 골드셋 CSV 로 M1~M14 를 측정하고 Phase 0 판정을 낸다
+              라벨(사람) + 파이프라인 실제 출력(DB) 을 대조한다.
+              ❗ 그 표본으로 파이프라인이 먼저 돌아 있어야 한다.
+              ❗ 라벨이 없는 지표는 숫자 대신 '미측정' 으로 보고한다.
+
 공통 옵션:
   --industry <derm|plastic|dental|franchise>   특정 업종만 (반복 대신 쉼표 구분)
   --out <dir>                                  출력 디렉터리 (기본 SPIKE_OUT_DIR)
@@ -43,11 +49,16 @@ verify 옵션:
   --fixtures <dir>     실제 응답을 저장할 디렉터리 (기본 fixtures/http)
   --no-record          fixture 를 저장하지 않는다
 
+measure 옵션:
+  --goldset <path>     라벨링이 끝난 CSV (필수)
+  --db <dsn>           DB 접속 문자열 (기본 DATABASE_URL 환경변수)
+
 예:
   pnpm spike verify
   pnpm spike universe
   pnpm spike universe --industry=dental,derm
   pnpm spike sample --per-industry 30 --seed 42
+  pnpm spike measure --goldset out/sample-seed42.csv
 
 공공데이터포털 키 발급:
   https://www.data.go.kr 회원가입 → 아래 3개 데이터셋에 '활용신청'
@@ -136,6 +147,29 @@ async function main(): Promise<number> {
       });
       process.stdout.write(formatSampleReport(report) + "\n");
       return 0;
+    }
+    case "measure": {
+      const goldsetPath = flagString(args, "goldset");
+      if (!goldsetPath) {
+        throw configError(
+          "--goldset <path> 가 필요합니다.\n" +
+            "  `pnpm spike sample` 로 뽑은 CSV 의 label_* 열을 채운 파일을 지정하세요.\n" +
+            "  라벨링 기준: docs/08-goldset-labeling.md",
+        );
+      }
+      const databaseUrl = flagString(args, "db") ?? process.env["DATABASE_URL"];
+      if (!databaseUrl) {
+        throw configError(
+          "DB 접속 정보가 필요합니다 (--db <dsn> 또는 DATABASE_URL).\n" +
+            "  측정은 파이프라인이 **실제로 낸 판정**을 읽습니다 — 다시 계산하지 않습니다.",
+        );
+      }
+
+      const report = await runMeasure({ goldsetPath, databaseUrl, logger });
+      process.stdout.write(formatMeasureReport(report) + "\n");
+      // ❗ stop 은 종료 코드 1 이다. CI·스크립트가 stdout 을 파싱하지 않아도 알 수 있어야 한다.
+      //    미판정도 1 이다 — 라벨을 덜 채운 것이 성공으로 읽히면 안 된다.
+      return report.verdict === "inconclusive" ? 0 : 1;
     }
     default:
       process.stderr.write(`알 수 없는 명령: ${args.command}\n${HELP}`);
