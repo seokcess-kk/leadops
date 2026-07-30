@@ -64,6 +64,9 @@ importers:
       '@leadops/http':
         specifier: workspace:*
         version: link:../../packages/http
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
 
   apps/worker:
     dependencies:

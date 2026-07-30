@@ -4,6 +4,7 @@ import { collectStage } from "./collect";
 import { contactPagesStage } from "./contactPages";
 import { excludeStage } from "./exclude";
 import { homepageStage } from "./homepage";
+import { homepageDiscoverStage } from "./homepageDiscover";
 import { normalizeStage } from "./normalize";
 import { scoreStage } from "./score";
 import { searchStage } from "./search";
@@ -14,6 +15,7 @@ export * from "./types";
 export * from "./collect";
 export * from "./normalize";
 export * from "./exclude";
+export * from "./homepageDiscover";
 export * from "./homepage";
 export * from "./contactPages";
 export * from "./channel";
@@ -34,6 +36,9 @@ export const STAGES: readonly StageHandler[] = [
   collectStage,
   normalizeStage,
   excludeStage,
+  // ❗ 판정(`homepage_detect`) **앞**이다. 발견은 후보를 만들 뿐이고, 그 후보가 공식인지는
+  //    기존 다신호 판정이 그대로 정한다. 순서가 뒤바뀌면 "검색이 찾았으니 공식" 이 된다.
+  homepageDiscoverStage,
   homepageStage,
   contactPagesStage,
   channelStage,

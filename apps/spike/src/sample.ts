@@ -12,6 +12,52 @@ import { renderTable } from "./cli";
  * 골드셋 라벨링의 입력으로 쓴다. 재현 가능해야 하므로 시드를 받는다.
  */
 
+/**
+ * 골드셋 CSV 헤더.
+ *
+ * 앞부분은 시스템이 채우고, `label_` 로 시작하는 열은 **사람이 채운다.**
+ *
+ * ❗ 라벨 열이 지표를 결정한다. 이전 버전은 M1~M3b 만 수집했는데, 설계서 9.1 의
+ *    **M7 은 stop 게이트**(체감 노출 ↔ ORS 상관)이고 M8·M9·M14 도 라벨이 필요하다.
+ *    수집 열이 없으면 라벨링 라운드를 다 돌려도 **판정을 낼 수 없다** — 그래서 여기에
+ *    함께 둔다. `measure.ts` 의 파서가 이 헤더를 기준으로 읽는다.
+ *
+ * ❗ 채점 기준을 열 이름에 담지 않는다. 라벨러가 무엇을 적어야 하는지는
+ *    `docs/08-goldset-labeling.md` 가 정한다 — 기준이 두 곳에 있으면 갈라진다.
+ */
+export const GOLDSET_HEADER = [
+  // ── 시스템이 채운다 ──
+  "industry",
+  "source",
+  "external_id",
+  "name",
+  "region_sido",
+  "region_sigungu",
+  "address",
+  "phone",
+  "homepage_url_hint",
+  // ── 사람이 채운다 ──
+  /** M1·M2 — 사람이 찾은 공식 홈페이지 URL. 없으면 비워 둔다. */
+  "label_official_url",
+  /** M2 — `official` | `not_official` | `none` */
+  "label_official_status",
+  /** M3b — 홈페이지 전체를 봤을 때 업무용 이메일이 있었나. `yes` | `no` */
+  "label_has_business_email",
+  /** M3 — 그 이메일을 찾은 경로 (예: `/contact`). 없으면 비워 둔다. */
+  "label_email_location",
+  /** M14 — 그 주소가 무료메일인가 (gmail·naver 등). `yes` | `no` */
+  "label_email_is_free_mail",
+  /** M7 — 검색해 봤을 때 체감 노출 1(전혀 안 보임) ~ 5(잘 보임). **stop 게이트 입력** */
+  "label_perceived_exposure",
+  /** M8 — 시스템이 고른 경쟁사가 타당한가 1~5 */
+  "label_competitor_validity",
+  /** M9 — 영업할 만한가. `yes` | `no` */
+  "label_worth_pitching",
+  /** M13 — `ssr` | `js_only` | `blocked` | 빈값 */
+  "label_render_mode",
+  "label_notes",
+] as const;
+
 export const DEFAULT_STRATA: ReadonlyArray<{ key: string; quota: number; match: (c: RawCandidate) => boolean }> = [
   { key: "서울", quota: 15, match: (c) => (c.regionSido ?? "").includes("서울") },
   {
@@ -119,26 +165,7 @@ export async function runSample(options: RunSampleOptions): Promise<SampleReport
   const http = createHttpClient(env, { logger });
   const adapters = createSourceAdapters(env, http);
 
-  const rows: string[] = [
-    // 골드셋 라벨링용 CSV. 사람이 채울 열을 미리 비워 둔다.
-    [
-      "industry",
-      "source",
-      "external_id",
-      "name",
-      "region_sido",
-      "region_sigungu",
-      "address",
-      "phone",
-      "homepage_url_hint",
-      // ↓ 사람이 채우는 열 (설계서 9.1 M1~M3b)
-      "label_official_url",
-      "label_official_status",
-      "label_has_business_email",
-      "label_email_location",
-      "label_notes",
-    ].join(","),
-  ];
+  const rows: string[] = [GOLDSET_HEADER.join(",")];
 
   const perIndustry: SampleReport["perIndustry"] = [];
 
@@ -159,22 +186,20 @@ export async function runSample(options: RunSampleOptions): Promise<SampleReport
     });
 
     for (const c of result.picked) {
-      rows.push(
-        [
-          c.industry,
-          c.source,
-          c.externalId,
-          c.name,
-          c.regionSido ?? "",
-          c.regionSigungu ?? "",
-          c.address ?? "",
-          c.phone ?? "",
-          c.homepageUrl ?? "",
-          "", "", "", "", "",
-        ]
-          .map(csvCell)
-          .join(","),
-      );
+      const system = [
+        c.industry,
+        c.source,
+        c.externalId,
+        c.name,
+        c.regionSido ?? "",
+        c.regionSigungu ?? "",
+        c.address ?? "",
+        c.phone ?? "",
+        c.homepageUrl ?? "",
+      ];
+      // 나머지는 사람이 채우는 열. 헤더 길이에서 계산해 열이 늘어도 어긋나지 않게 한다.
+      const blanks = new Array<string>(GOLDSET_HEADER.length - system.length).fill("");
+      rows.push([...system, ...blanks].map(csvCell).join(","));
     }
 
     perIndustry.push({

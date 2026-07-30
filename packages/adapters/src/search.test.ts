@@ -1,4 +1,18 @@
 import { describe, expect, it } from "vitest";
+
+/** 지역검색 응답 한 건. 실제 필드명을 그대로 쓴다 (개발자 문서 기준). */
+const localItem = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  title: "<b>강남삼성</b>피부과의원",
+  link: "https://gangnam-samsung.co.kr",
+  category: "의료,건강>피부과",
+  description: "",
+  telephone: "02-555-1234",
+  address: "서울특별시 강남구 역삼동 1",
+  roadAddress: "서울특별시 강남구 테헤란로 1",
+  mapx: "1270000000",
+  mapy: "375000000",
+  ...over,
+});
 import { MAX_DISPLAY, parseHitDate, parseNaverResponse, stripHighlight } from "./search";
 
 /**
@@ -118,5 +132,55 @@ describe("채널별 상한 (설계서 3.1)", () => {
     for (const p of ["blog", "cafearticle", "webkr", "news"] as const) {
       expect(MAX_DISPLAY[p]).toBe(100);
     }
+  });
+});
+
+/**
+ * 지역검색은 홈페이지 발견의 입력이다 (M1 소스 보강).
+ *
+ * ❗ 전화·주소를 버리면 검색 결과가 **그 업체인지 판별할 근거가 사라진다.**
+ *    상호만으로 채택하면 전국의 동명 업체를 그 업체의 홈페이지로 저장하게 된다.
+ */
+describe("지역검색 파싱 — 판별 근거 보존", () => {
+  const parse = (items: unknown[]) =>
+    parseNaverResponse("local", "강남구 강남삼성피부과의원", JSON.stringify({ total: items.length, items }));
+
+  it("전화·주소·도로명주소를 보존한다", () => {
+    const [hit] = parse([localItem()]).hits;
+    expect(hit?.telephone).toBe("02-555-1234");
+    expect(hit?.address).toBe("서울특별시 강남구 역삼동 1");
+    expect(hit?.roadAddress).toBe("서울특별시 강남구 테헤란로 1");
+    // 상호의 <b> 강조 태그는 제거된다.
+    expect(hit?.title).toBe("강남삼성피부과의원");
+  });
+
+  it("❗ 링크가 없는 지역검색 결과도 버리지 않는다 (홈페이지 없음도 정보다)", () => {
+    const result = parse([localItem({ link: "" })]);
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]?.link).toBe("");
+    // 전화·주소는 그대로 있어야 판별에 쓸 수 있다.
+    expect(result.hits[0]?.telephone).toBe("02-555-1234");
+  });
+
+  it("빈 문자열 필드는 undefined 로 둔다 (빈 값과 없는 값을 섞지 않는다)", () => {
+    const [hit] = parse([localItem({ telephone: "", roadAddress: "   " })]).hits;
+    expect(hit?.telephone).toBeUndefined();
+    expect(hit?.roadAddress).toBeUndefined();
+    expect(hit?.address).toBe("서울특별시 강남구 역삼동 1");
+  });
+
+  it("다른 provider 는 링크 없는 결과를 여전히 건너뛴다", () => {
+    const body = JSON.stringify({ total: 1, items: [{ title: "글", link: "", description: "" }] });
+    expect(parseNaverResponse("blog", "키워드", body).hits).toHaveLength(0);
+  });
+
+  it("다른 provider 응답에는 지역검색 필드가 붙지 않는다", () => {
+    const body = JSON.stringify({
+      total: 1,
+      items: [{ title: "글", link: "https://blog.example.kr/1", description: "본문" }],
+    });
+    const [hit] = parseNaverResponse("blog", "키워드", body).hits;
+    expect(hit?.telephone).toBeUndefined();
+    expect(hit?.address).toBeUndefined();
   });
 });

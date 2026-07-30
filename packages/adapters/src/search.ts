@@ -29,6 +29,16 @@ export interface SearchHit {
   /** 블로그명·카페명 등 출처 표시. 공식 채널 판별의 보조 신호. */
   readonly sourceName?: string | undefined;
   readonly sourceUrl?: string | undefined;
+  /**
+   * 지역검색(`local`) 전용 — 그 결과가 **정말 그 업체인지** 판별할 근거.
+   *
+   * ❗ 이 값들이 없으면 검색 결과를 검증할 방법이 없다. 상호만으로 채택하면 전국의 동명
+   *    업체를 그 업체의 홈페이지로 저장하게 된다 (`homepageDiscovery.ts` 참고).
+   *    다른 provider 에는 이 필드가 없으므로 `undefined` 다.
+   */
+  readonly telephone?: string | undefined;
+  readonly address?: string | undefined;
+  readonly roadAddress?: string | undefined;
 }
 
 export interface SearchResult {
@@ -191,7 +201,10 @@ export function parseNaverResponse(
     if (raw === null || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
     const link = typeof item["link"] === "string" ? item["link"] : "";
-    if (link === "") continue;
+    // ❗ 지역검색은 홈페이지가 없는 업체를 `link: ""` 로 준다. 그 자체가 정보이므로
+    //    (홈페이지 없음) 버리지 않고, 판별에 쓸 값들과 함께 남긴다. 다른 provider 는
+    //    링크 없는 결과가 의미가 없으므로 지금처럼 건너뛴다.
+    if (link === "" && provider !== "local") continue;
 
     const published = parseHitDate(item["postdate"]) ?? parseHitDate(item["pubDate"]);
     const sourceName = stripHighlight(item["bloggername"] ?? item["cafename"] ?? item["publisher"]);
@@ -201,6 +214,17 @@ export function parseNaverResponse(
         ? item["cafeurl"]
         : undefined;
 
+    // 지역검색 전용 판별 근거. 다른 provider 응답에는 없다.
+    const text = (key: string): string | undefined => {
+      const value = item[key];
+      if (typeof value !== "string") return undefined;
+      const cleaned = stripHighlight(value).trim();
+      return cleaned === "" ? undefined : cleaned;
+    };
+    const telephone = text("telephone");
+    const address = text("address");
+    const roadAddress = text("roadAddress");
+
     hits.push({
       rank: index + 1,
       title: stripHighlight(item["title"]),
@@ -209,6 +233,9 @@ export function parseNaverResponse(
       ...(published ? { publishedAt: published } : {}),
       ...(sourceName ? { sourceName } : {}),
       ...(sourceUrl ? { sourceUrl } : {}),
+      ...(telephone ? { telephone } : {}),
+      ...(address ? { address } : {}),
+      ...(roadAddress ? { roadAddress } : {}),
     });
   }
 
