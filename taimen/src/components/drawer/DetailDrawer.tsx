@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/Button";
 import { AxisGauge } from "@/components/ui/LeadScore";
 import { MonoLabel } from "@/components/ui/MonoLabel";
 import { SignalStream, type StreamEvent } from "@/components/stream/SignalStream";
-import { AXIS_MAX, INDUSTRY_LABEL, type EnteredEmail, type ReviewItem } from "@/lib/data/types";
+import { AXIS_MAX, INDUSTRY_LABEL, isSevere, type EnteredEmail, type ReviewItem } from "@/lib/data/types";
+import type { VerifyInput } from "./EmailEntry";
 import { CompetitorComparison } from "./CompetitorComparison";
 import { EmailEntry } from "./EmailEntry";
 import { SearchGapPanel } from "./SearchGapPanel";
@@ -52,14 +53,16 @@ export function DetailDrawer({
   onClose,
   onApprove,
   onReject,
-  onSubmitEmail,
+  onVerifyEmail,
+  busy,
 }: {
   item: ReviewItem;
   focusEmail: number;
   onClose: () => void;
   onApprove: () => void;
   onReject: () => void;
-  onSubmitEmail: (email: EnteredEmail) => void;
+  onVerifyEmail: (input: VerifyInput) => Promise<EnteredEmail | undefined>;
+  busy: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -173,7 +176,7 @@ export function DetailDrawer({
                     <span
                       aria-hidden
                       className={`h-1.5 w-1.5 rounded-full ${
-                        weakness.severity === "high" ? "bg-violet-bright" : "bg-fg-2"
+                        isSevere(weakness.severity) ? "bg-violet-bright" : "bg-fg-2"
                       }`}
                     />
                     {weakness.label}
@@ -231,7 +234,7 @@ export function DetailDrawer({
 
           {/* 08 이메일 출처·입력 */}
           <Section index={8} label="Email Source" sub="연락처 페이지 · 수동 입력">
-            <EmailEntry item={item} focusSignal={focusEmail} onSubmit={onSubmitEmail} />
+            <EmailEntry item={item} focusSignal={focusEmail} busy={busy} onVerify={onVerifyEmail} />
           </Section>
 
           {/* 09 추천 서비스 */}
@@ -253,14 +256,14 @@ export function DetailDrawer({
         <div className="flex shrink-0 items-center gap-2 border-t border-line px-6 py-4">
           <MonoLabel index={10}>Decision</MonoLabel>
           <div className="flex flex-1 justify-end gap-2">
-            <Button onClick={onReject}>제외</Button>
+            <Button onClick={onReject} disabled={busy}>제외</Button>
             <Button
               variant="primary"
-              disabled={!mxOk}
+              disabled={!mxOk || busy}
               onClick={onApprove}
               title={mxOk ? "승인" : "MX 검증을 통과한 이메일이 필요합니다"}
             >
-              승인
+              {busy ? "처리 중…" : "승인"}
             </Button>
           </div>
         </div>

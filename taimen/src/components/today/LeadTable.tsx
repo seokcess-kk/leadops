@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { LeadScore } from "@/components/ui/LeadScore";
-import { INDUSTRY_LABEL, type ReviewItem } from "@/lib/data/types";
+import { INDUSTRY_LABEL, isSevere, type ReviewItem } from "@/lib/data/types";
 
 /**
  * 검수 테이블 — 이 제품의 심장.
@@ -118,7 +118,7 @@ export function LeadTable({
                       <span
                         aria-hidden
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          topWeakness.severity === "high" ? "bg-violet-bright" : "bg-fg-2"
+                          isSevere(topWeakness.severity) ? "bg-violet-bright" : "bg-fg-2"
                         }`}
                       />
                       <span className="truncate">{topWeakness.label}</span>

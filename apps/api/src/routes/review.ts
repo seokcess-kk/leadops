@@ -34,7 +34,21 @@ interface BulkBody {
   reason?: unknown;
 }
 
-const EMAIL_TYPES = ["representative", "inquiry", "partnership", "marketing", "business", "staff", "unknown"];
+/**
+ * `email_type` 열거형과 **정확히 일치해야 한다** (마이그레이션 0001).
+ *
+ * 어긋나면 API 가 통과시킨 값이 DB 캐스팅에서 터져 400 이 아니라 500 이 된다 —
+ * 사용자는 무엇이 잘못됐는지 알 수 없다.
+ */
+const EMAIL_TYPES = [
+  "representative",
+  "inquiry",
+  "partnership",
+  "marketing",
+  "business_info",
+  "staff",
+  "unknown",
+] as const;
 
 const str = (value: unknown, field: string): string => {
   if (typeof value !== "string" || value.trim() === "") throw badRequest(`${field} 가 필요합니다`);
@@ -59,12 +73,20 @@ export function reviewRoutes(deps: ReviewDeps): Router {
              s.axis_confidence::float8 as axis_confidence, s.total::float8 as total,
              s.weaknesses, (s.breakdown -> 'normalized')::float8 as normalized,
              r.primary_service, r.secondary_services,
-             e.address as email_address, e.mx_ok
+             e.id as email_id, e.address::text as email_address, e.mx_ok
       from review_items ri
       join scores s on s.id = ri.score_id
       join companies c on c.id = ri.company_id
       left join recommendations r on r.score_id = s.id
-      left join emails e on e.company_id = c.id and e.acquisition_method = 'manual_entry'
+      -- ❗ lateral + limit 1 이어야 한다. 그냥 join 하면 같은 업체에 수동 입력 이메일이
+      --    여러 건일 때 **검수 항목이 중복 행으로 나온다** (재입력·유형 변경으로 실제로 생긴다).
+      left join lateral (
+        select e.id, e.address, e.mx_ok
+        from emails e
+        where e.company_id = c.id and e.acquisition_method = 'manual_entry'
+        order by e.entered_at desc nulls last
+        limit 1
+      ) e on true
       where ri.status = ${status}::review_status
       order by ri.rank
       limit ${limit}
@@ -175,7 +197,7 @@ export function reviewRoutes(deps: ReviewDeps): Router {
     const emailType = str(body.emailType, "emailType");
     const contactPageId = str(body.contactPageId, "contactPageId");
     const nonce = str(body.nonce, "nonce");
-    if (!EMAIL_TYPES.includes(emailType)) {
+    if (!(EMAIL_TYPES as readonly string[]).includes(emailType)) {
       throw badRequest(`emailType 은 ${EMAIL_TYPES.join(", ")} 중 하나여야 합니다`);
     }
 

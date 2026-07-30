@@ -3,8 +3,8 @@
 마케팅 에이전시 내부용 리드 발굴 도구. 검색 수요는 있으나 검색 결과물·콘텐츠 점유가
 경쟁사보다 부족한 업체를 찾아 영업 가치가 높은 리드만 선별한다.
 
-> **현재 상태: Phase 6 진행 (검수 API·MX 검증 완료 / taimen 연동 미완)**
-> 설계서 `docs/00-plan.md` v3 기준. API 는 동작하고, UI 는 아직 fixture 모드다.
+> **현재 상태: Phase 6 진행 (검수 API·MX·UI 연동 완료 / E2E·나머지 엔드포인트 미완)**
+> 설계서 `docs/00-plan.md` v3 기준. 검수 → 이메일 → 승인 → 리드가 UI 에서 실제로 동작한다.
 
 ## 문서
 
@@ -148,6 +148,13 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 | 알 수 없는 오류를 4xx 로 내리지 않는다 (규칙 위반과 버그를 섞지 않는다) | `toApiError` — 목록에 없으면 500 |
 | SMTP 프로빙을 하지 않는다 · null MX 는 거부한다 | `packages/http/src/mx.ts` |
 | 일괄 처리에 **승인 경로가 없다** | `stages`/API 양쪽 — `bulk-decision` 은 제외만 |
+| **토큰이 브라우저에 내려가지 않는다** | `taimen/src/app/api/gateway` 프록시 + `src/lib/server/token.ts` |
+| 프록시는 허용 목록 밖 경로를 404 로 막는다 | 같은 파일 — `ALLOWED` |
+| 인증이 구성되지 않으면 **거부한다** (조용한 폴백 금지) | `sessionToken()` — `401 auth_unavailable` |
+| UI 는 낙관적 갱신을 하지 않는다 (실패한 승인이 성공처럼 보이지 않게) | `taimen/src/lib/data/store.tsx` |
+| UI 도 모르는 값을 0 으로 채우지 않는다 | `mapper.ts` · `CompetitorComparison` · `SearchGapPanel` |
+| UI 의 취약점 등급이 백엔드 어휘와 같다 | `WeaknessSeverity` — 변환 계층을 두지 않는다 |
+| `email_type` 허용 목록이 DB 열거형과 일치한다 | `routes/review.ts` — 어긋나면 400 이 아니라 500 이 된다 |
 | `NODE_ENV=production` 에서 mock 어댑터는 부팅을 막는다 | 같은 파일 |
 | ORS(네이버)는 자격증명 없이 켤 수 없다 | 같은 파일 |
 | 승인되지 않은 데이터 소스는 어댑터가 실행을 거부한다 | `packages/core/src/sourceRegistry.ts` |
@@ -378,6 +385,52 @@ GET  /api/leads · /api/leads/export  목록 · export(admin 전용)
 
 `pnpm api` 로 띄운다. `API_DATABASE_URL` · `SUPABASE_JWT_SECRET` 이 필요하다.
 
+### UI 연동 — 토큰은 브라우저에 내려가지 않는다
+
+```
+브라우저 → taimen /api/gateway/* (Next 라우트 핸들러) → 검수 API
+```
+
+프록시를 두는 이유가 셋이다.
+
+1. **토큰이 클라이언트에 없다.** localStorage 나 번들에 두면 XSS 하나로 검수 권한이 유출된다.
+2. CORS 가 필요 없다 — 브라우저에서 보면 같은 출처다.
+3. Supabase Auth 를 붙일 때 고칠 곳이 `src/lib/server/token.ts` 하나다.
+
+프록시는 경로를 **허용 목록**으로 좁힌다. 열어 두면 이 핸들러가 API 전체에 대한 통로가 된다.
+
+```bash
+# 검수 API
+API_DATABASE_URL=... SUPABASE_JWT_SECRET=... API_PORT=8792 pnpm api
+
+# UI (taimen/)
+LEADOPS_API_URL=http://127.0.0.1:8792 SUPABASE_JWT_SECRET=... LEADOPS_DEV_LOGIN=1 LEADOPS_DEV_USER_ID=<profiles.id> pnpm dev
+```
+
+> ⚠️ **`LEADOPS_DEV_LOGIN` 은 인증이 아니라 인증의 자리표시자다.** Supabase Auth 프로젝트가
+> 없어서 서버가 직접 토큰을 만든다. `NODE_ENV=production` 이거나 플래그가 없으면
+> `401 auth_unavailable` 로 **거부한다** — 조용히 폴백하지 않는다.
+
+### ❗ 낙관적 갱신을 하지 않는다
+
+승인은 일 상한(409)·업종 쿼터(409)·MX 미통과(422)·nonce 만료(403)로 거절될 수 있다.
+화면이 먼저 "승인"으로 바꿔 두면 **실패한 승인이 성공처럼 보인다.** 서버가 확인해 준 뒤에
+목록을 다시 읽는다. 거절 사유는 코드와 함께 화면에 띄운다.
+
+이것이 첫 리뷰에서 지적한 **일 상한·업종 쿼터 미강제** 문제의 해소 방식이다 — UI 가 상한을
+직접 세지 않고, DB 가 세고 API 가 옮기고 UI 는 결과를 보여 준다.
+
+### ❗ 모르는 값을 0 으로 채우지 않는다
+
+백엔드가 지키는 원칙(설계서 A.6)이 UI 에서 무너지면 검수자가 잘못 판단한다.
+
+| 값 | API 가 모를 때 | 화면 |
+|---|---|---|
+| 경쟁사 ORS·활동량 | `null` | `—` (0 이 아니다) |
+| 경쟁 중앙값 | `null` | `—`, 격차 % 도 계산하지 않는다 |
+| 실행 ID·비용·쿼터 | 엔드포인트 없음 | `—` (fixture 숫자를 섞지 않는다) |
+| 분석되지 않은 경쟁사 | `is_valid=false` | 흐리게 + 사유 툴팁 |
+
 ### 규칙은 API 를 통과해도 유지된다
 
 API 는 **입력을 옮기고 결과를 옮길 뿐**이다. 상한·쿼터·게이트·nonce·rate limit 은 전부
@@ -410,8 +463,12 @@ UUID 가 아니면 거절한다.
 
 ## 아직 없는 것
 
-**taimen UI ↔ API 연동** · Playwright E2E · 실행/설정/업종/비용/개인정보 엔드포인트 ·
-스케줄러(pg_cron) · 개인정보 워크플로.
+Playwright E2E · 실행/설정/업종/비용/개인정보 엔드포인트 · Supabase Auth ·
+스케줄러(pg_cron) · 개인정보 워크플로 · Outreach(발송 상태) 모듈.
+
+UI 에서 아직 fixture 를 쓰는 화면: `/runs` · `/industries` · `/settings`
+(해당 엔드포인트가 없다). `/today` 와 `/leads` 는 실데이터다.
+검색 결과물 목록(`search_hits`)은 API 가 노출하지 않아 드로어의 SignalStream 이 비어 있다.
 
 다음은 **taimen 을 API 에 연결하는 일**이다. UI 는 fixture 모드로 이미 있으므로
 `store.tsx` 의 전이 함수를 위 엔드포인트 호출로 바꾸면 된다. 이때 taimen 의

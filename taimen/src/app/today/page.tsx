@@ -7,6 +7,7 @@ import { FilterBar, type ReviewFilter } from "@/components/today/FilterBar";
 import { LeadTable } from "@/components/today/LeadTable";
 import { MetricStrip } from "@/components/today/MetricStrip";
 import { RejectDialog } from "@/components/today/RejectDialog";
+import { Notice } from "@/components/ui/Notice";
 import { runs, TODAY } from "@/lib/data/fixtures";
 import { useReview } from "@/lib/data/store";
 import { INDUSTRY_LABEL } from "@/lib/data/types";
@@ -17,7 +18,7 @@ import { INDUSTRY_LABEL } from "@/lib/data/types";
  * 일괄 처리는 제외만 — 승인은 MX 통과 이메일이 필요하므로 개별 처리.
  */
 export default function TodayPage() {
-  const { state, dispatch, metrics } = useReview();
+  const { state, dispatch, metrics, actions, source } = useReview();
   const [filter, setFilter] = useState<ReviewFilter>({ industry: "all", query: "", minScore: 0 });
   const [reject, setReject] = useState<{ ids: string[]; label: string } | null>(null);
 
@@ -84,13 +85,13 @@ export default function TodayPage() {
           if (cursorItem) dispatch({ type: "focusEmail", id: cursorItem.id });
           break;
         case "Enter":
-          if (cursorItem && !state.openId) dispatch({ type: "open", id: cursorItem.id });
+          if (cursorItem && !state.openId) void actions.openItem(cursorItem.id);
           break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dispatch, visibleIds, visible, cursor, cursorItem, state.openId, reject, openReject]);
+  }, [dispatch, actions, visibleIds, visible, cursor, cursorItem, state.openId, reject, openReject]);
 
   const latestRun = runs[0];
 
@@ -101,14 +102,36 @@ export default function TodayPage() {
         title="오늘의 검수"
         right={
           <>
-            <HeaderStat label="Run" value={latestRun.id.toUpperCase()} />
-            <HeaderStat label="Cost" value={`₩${metrics.costKrw.toLocaleString("ko-KR")}`} />
-            <HeaderStat label="Quota" value={`${metrics.naverQuotaPct}%`} accent={metrics.naverQuotaPct > 80} />
+            {/* ⚠️ 실행 ID·비용·쿼터는 /api/runs·/api/costs 가 없어 아직 알 수 없다.
+                fixture 값을 실데이터처럼 보여 주지 않는다. */}
+            <HeaderStat label="Run" value={source === "fixture" ? latestRun.id.toUpperCase() : "—"} />
+            <HeaderStat label="Cost" value={source === "fixture" ? `₩${metrics.costKrw.toLocaleString("ko-KR")}` : "—"} />
+            <HeaderStat
+              label="Quota"
+              value={source === "fixture" ? `${metrics.naverQuotaPct}%` : "—"}
+              accent={source === "fixture" && metrics.naverQuotaPct > 80}
+            />
             <HeaderStat label="Date" value={TODAY} />
           </>
         }
       />
       <main className="flex flex-1 flex-col gap-5 p-8">
+        {state.notice && (
+          <Notice
+            kind={state.notice.kind}
+            code={state.notice.code}
+            message={state.notice.message}
+            onDismiss={actions.dismissNotice}
+            action={{ label: "다시 불러오기", onClick: () => void actions.refresh() }}
+          />
+        )}
+        {source === "fixture" && (
+          <Notice
+            kind="info"
+            code="fixture mode"
+            message="개발용 fixture 데이터입니다. 승인·제외가 서버에 저장되지 않습니다."
+          />
+        )}
         <MetricStrip />
         <FilterBar
           filter={filter}
@@ -118,19 +141,23 @@ export default function TodayPage() {
             openReject(Array.from(state.selected), `선택한 ${state.selected.size}개 업체`)
           }
         />
+        {state.loading ? (
+          <p className="k-label px-1 py-8">불러오는 중…</p>
+        ) : (
         <LeadTable
           items={visible}
           cursor={cursor}
           selected={state.selected}
-          onOpen={(id) => dispatch({ type: "open", id })}
+          onOpen={(id) => void actions.openItem(id)}
           onToggle={(id) => dispatch({ type: "toggleSelect", id })}
-          onApprove={(id) => dispatch({ type: "approve", id })}
+          onApprove={(id) => void actions.approve(id)}
           onReject={(id) => {
             const item = state.items.find((it) => it.id === id);
             if (item) openReject([id], item.companyName);
           }}
           onCursor={(index) => dispatch({ type: "cursor", delta: index - cursor, visibleIds })}
         />
+        )}
       </main>
 
       {openItem && (
@@ -138,9 +165,10 @@ export default function TodayPage() {
           item={openItem}
           focusEmail={state.focusEmail}
           onClose={() => dispatch({ type: "open", id: null })}
-          onApprove={() => dispatch({ type: "approve", id: openItem.id })}
+          onApprove={() => void actions.approve(openItem.id)}
           onReject={() => openReject([openItem.id], openItem.companyName)}
-          onSubmitEmail={(email) => dispatch({ type: "submitEmail", id: openItem.id, email })}
+          onVerifyEmail={(input) => actions.submitEmail(openItem.id, input)}
+          busy={state.busy !== null}
         />
       )}
 
@@ -149,12 +177,10 @@ export default function TodayPage() {
           targetLabel={reject.label}
           onClose={() => setReject(null)}
           onConfirm={(reason) => {
-            if (reject.ids.length === 1) {
-              dispatch({ type: "reject", id: reject.ids[0], reason });
-            } else {
-              dispatch({ type: "bulkReject", ids: reject.ids, reason });
-            }
+            const ids = reject.ids;
             setReject(null);
+            if (ids.length === 1) void actions.reject(ids[0]!, reason);
+            else void actions.bulkReject(ids, reason);
           }}
         />
       )}

@@ -21,6 +21,9 @@ export function CompetitorComparison({
   }
 
   const th = "mono-label px-2 py-1.5 text-right text-[8px] font-medium";
+  /** ❗ 모르는 값은 0 이 아니라 `—` 다. 0 으로 쓰면 "경쟁사가 안 한다" 로 읽힌다. */
+  const cell = (value: number | null, fmt: (n: number) => string): string =>
+    value === null ? "—" : fmt(value);
 
   return (
     <table className="w-full border-collapse">
@@ -39,16 +42,21 @@ export function CompetitorComparison({
             key={row.name}
             className={`border-b border-row text-[12px] last:border-b-0 ${
               row.isSelf ? "border-l border-l-mint bg-subtle font-medium text-fg" : "text-fg-2"
-            }`}
+            } ${row.isValid ? "" : "opacity-50"}`}
+            title={row.isValid ? undefined : "분석되지 않은 경쟁사 — 지표 없음"}
           >
             <td className="max-w-[150px] truncate px-2 py-1.5">{row.name}</td>
             <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">
-              {(row.ors * 100).toFixed(0)}%
+              {cell(row.ors, (n) => `${(n * 100).toFixed(0)}%`)}
             </td>
-            <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">{row.officialAssets}</td>
-            <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">{row.recency60d}</td>
             <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">
-              {row.channelActivity.toFixed(1)}
+              {cell(row.officialAssets, (n) => String(n))}
+            </td>
+            <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">
+              {cell(row.recency60d, (n) => String(n))}
+            </td>
+            <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">
+              {cell(row.channelActivity, (n) => n.toFixed(1))}
             </td>
           </tr>
         ))}

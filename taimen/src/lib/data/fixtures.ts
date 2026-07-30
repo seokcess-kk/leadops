@@ -43,9 +43,9 @@ export const reviewItems: ReviewItem[] = [
       "공공 데이터·홈페이지·채널 3원 교차 확인 — 신뢰 상위",
     ],
     weaknesses: [
-      { kind: "no_recent_content", label: "최근 60일 발행 0건", severity: "high", metric: "0건/60일" },
-      { kind: "ors_gap", label: "블로그 회수 경쟁 대비 8%", severity: "high", metric: "3 vs 38" },
-      { kind: "channel_single", label: "채널 다양성 1종", severity: "mid" },
+      { kind: "no_recent_content", label: "최근 60일 발행 0건", severity: "strong", metric: "0건/60일" },
+      { kind: "ors_gap", label: "블로그 회수 경쟁 대비 8%", severity: "strong", metric: "3 vs 38" },
+      { kind: "channel_single", label: "채널 다양성 1종", severity: "medium" },
     ],
     ors: [
       { channel: "blog", count: 3, competitorMedian: 38 },
@@ -55,10 +55,10 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "라온피부과의원", ors: 0.08, officialAssets: 4, recency60d: 0, channelActivity: 0.6, isSelf: true },
-      { name: "M피부과 (합정)", ors: 0.41, officialAssets: 31, recency60d: 18, channelActivity: 3.2 },
-      { name: "S클리닉 (홍대)", ors: 0.33, officialAssets: 22, recency60d: 11, channelActivity: 2.4 },
-      { name: "더블유의원 (공덕)", ors: 0.18, officialAssets: 12, recency60d: 5, channelActivity: 1.1 },
+      { name: "라온피부과의원", isValid: true, ors: 0.08, officialAssets: 4, recency60d: 0, channelActivity: 0.6, isSelf: true },
+      { name: "M피부과 (합정)", isValid: true, ors: 0.41, officialAssets: 31, recency60d: 18, channelActivity: 3.2 },
+      { name: "S클리닉 (홍대)", isValid: true, ors: 0.33, officialAssets: 22, recency60d: 11, channelActivity: 2.4 },
+      { name: "더블유의원 (공덕)", isValid: true, ors: 0.18, officialAssets: 12, recency60d: 5, channelActivity: 1.1 },
     ],
     competitorGapAvailable: true,
     activity60d: 0, activity120d: 2, lastContentAt: "2026-03-14",
@@ -68,9 +68,9 @@ export const reviewItems: ReviewItem[] = [
       asset("web", "라온피부과의원 진료 안내", "2025-12-20", true),
     ],
     contactPages: [
-      { path: "/contact", label: "문의하기", confidence: 0.91 },
-      { path: "/about", label: "병원소개", confidence: 0.64 },
-      { path: "/privacy", label: "개인정보처리방침", confidence: 0.52 },
+      { id: "cp-1", url: "https://example.kr/contact", path: "/contact", label: "문의하기", confidence: 0.91 },
+      { id: "cp-2", url: "https://example.kr/about", path: "/about", label: "병원소개", confidence: 0.64 },
+      { id: "cp-3", url: "https://example.kr/privacy", path: "/privacy", label: "개인정보처리방침", confidence: 0.52 },
     ],
     primaryService: "블로그 콘텐츠 운영 대행",
     secondaryServices: ["플레이스 정보 최적화", "홈페이지 콘텐츠 리뉴얼"],
@@ -88,8 +88,8 @@ export const reviewItems: ReviewItem[] = [
       "홈페이지·플레이스 정보 일치",
     ],
     weaknesses: [
-      { kind: "ors_gap", label: "비브랜드 회수 격차", severity: "high", metric: "14%" },
-      { kind: "no_cafe", label: "카페 언급 0건", severity: "mid" },
+      { kind: "ors_gap", label: "비브랜드 회수 격차", severity: "strong", metric: "14%" },
+      { kind: "no_cafe", label: "카페 언급 0건", severity: "medium" },
     ],
     ors: [
       { channel: "blog", count: 7, competitorMedian: 42 },
@@ -99,10 +99,10 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "미소진치과의원", ors: 0.14, officialAssets: 9, recency60d: 3, channelActivity: 1.0, isSelf: true },
-      { name: "B치과 (서현)", ors: 0.44, officialAssets: 27, recency60d: 15, channelActivity: 2.9 },
-      { name: "K치과 (정자)", ors: 0.29, officialAssets: 18, recency60d: 9, channelActivity: 2.0 },
-      { name: "라임치과 (판교)", ors: 0.21, officialAssets: 14, recency60d: 7, channelActivity: 1.6 },
+      { name: "미소진치과의원", isValid: true, ors: 0.14, officialAssets: 9, recency60d: 3, channelActivity: 1.0, isSelf: true },
+      { name: "B치과 (서현)", isValid: true, ors: 0.44, officialAssets: 27, recency60d: 15, channelActivity: 2.9 },
+      { name: "K치과 (정자)", isValid: true, ors: 0.29, officialAssets: 18, recency60d: 9, channelActivity: 2.0 },
+      { name: "라임치과 (판교)", isValid: true, ors: 0.21, officialAssets: 14, recency60d: 7, channelActivity: 1.6 },
     ],
     competitorGapAvailable: true,
     activity60d: 3, activity120d: 8, lastContentAt: "2026-07-02",
@@ -112,14 +112,14 @@ export const reviewItems: ReviewItem[] = [
       asset("web", "분당 미소진치과 진료시간", "2026-05-11", true),
     ],
     contactPages: [
-      { path: "/consult", label: "상담 문의", confidence: 0.88 },
-      { path: "/about", label: "치과 소개", confidence: 0.61 },
+      { id: "cp-4", url: "https://example.kr/consult", path: "/consult", label: "상담 문의", confidence: 0.88 },
+      { id: "cp-5", url: "https://example.kr/about", path: "/about", label: "치과 소개", confidence: 0.61 },
     ],
     primaryService: "비브랜드 검색 콘텐츠 확충",
     secondaryServices: ["카페 커뮤니티 관리", "후기 콘텐츠 기획"],
     recommendRationale: "장비 투자는 하고 있으나 검색 접점이 브랜드 키워드에 편중. 비브랜드 확장 여지가 크다.",
     status: "pending",
-    email: { address: "info@misojin-dental.example", type: "대표", sourcePath: "/consult", verification: "mx_ok" },
+    email: { address: "info@misojin-dental.example", type: "representative", sourcePath: "/consult", verification: "mx_ok" },
   },
   {
     id: "rv-003", rank: 3, companyName: "청담라인성형외과", industry: "plastic",
@@ -132,8 +132,8 @@ export const reviewItems: ReviewItem[] = [
       "채널 자산 소수로 신뢰 축 중간",
     ],
     weaknesses: [
-      { kind: "no_place", label: "플레이스 미등록", severity: "high" },
-      { kind: "no_recent_content", label: "최근 60일 발행 1건", severity: "mid", metric: "1건/60일" },
+      { kind: "no_place", label: "플레이스 미등록", severity: "strong" },
+      { kind: "no_recent_content", label: "최근 60일 발행 1건", severity: "medium", metric: "1건/60일" },
     ],
     ors: [
       { channel: "blog", count: 12, competitorMedian: 55 },
@@ -143,9 +143,9 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "청담라인성형외과", ors: 0.11, officialAssets: 15, recency60d: 1, channelActivity: 0.9, isSelf: true },
-      { name: "G성형외과 (신사)", ors: 0.38, officialAssets: 44, recency60d: 21, channelActivity: 3.8 },
-      { name: "라포레의원 (압구정)", ors: 0.27, officialAssets: 29, recency60d: 12, channelActivity: 2.2 },
+      { name: "청담라인성형외과", isValid: true, ors: 0.11, officialAssets: 15, recency60d: 1, channelActivity: 0.9, isSelf: true },
+      { name: "G성형외과 (신사)", isValid: true, ors: 0.38, officialAssets: 44, recency60d: 21, channelActivity: 3.8 },
+      { name: "라포레의원 (압구정)", isValid: true, ors: 0.27, officialAssets: 29, recency60d: 12, channelActivity: 2.2 },
     ],
     competitorGapAvailable: true,
     activity60d: 1, activity120d: 5, lastContentAt: "2026-06-20",
@@ -154,8 +154,8 @@ export const reviewItems: ReviewItem[] = [
       asset("cafe", "청담 쪽 상담 다녀온 후기", "2026-04-15"),
     ],
     contactPages: [
-      { path: "/contact", label: "오시는 길·문의", confidence: 0.83 },
-      { path: "/intro", label: "의료진 소개", confidence: 0.47 },
+      { id: "cp-6", url: "https://example.kr/contact", path: "/contact", label: "오시는 길·문의", confidence: 0.83 },
+      { id: "cp-7", url: "https://example.kr/intro", path: "/intro", label: "의료진 소개", confidence: 0.47 },
     ],
     primaryService: "플레이스 신규 등록·세팅",
     secondaryServices: ["블로그 콘텐츠 운영 대행", "지역 키워드 콘텐츠"],
@@ -173,8 +173,8 @@ export const reviewItems: ReviewItem[] = [
       "공정위 등록 정보와 홈페이지 일치",
     ],
     weaknesses: [
-      { kind: "ors_gap", label: "가맹 키워드 회수 공백", severity: "high", metric: "2 vs 29" },
-      { kind: "no_news", label: "뉴스 언급 없음", severity: "mid" },
+      { kind: "ors_gap", label: "가맹 키워드 회수 공백", severity: "strong", metric: "2 vs 29" },
+      { kind: "no_news", label: "뉴스 언급 없음", severity: "medium" },
     ],
     ors: [
       { channel: "blog", count: 2, competitorMedian: 29 },
@@ -184,9 +184,9 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "본가한상", ors: 0.09, officialAssets: 7, recency60d: 2, channelActivity: 0.8, isSelf: true },
-      { name: "H반상 (가맹 61)", ors: 0.35, officialAssets: 25, recency60d: 14, channelActivity: 2.7 },
-      { name: "진미푸드 (가맹 48)", ors: 0.31, officialAssets: 20, recency60d: 10, channelActivity: 2.1 },
+      { name: "본가한상", isValid: true, ors: 0.09, officialAssets: 7, recency60d: 2, channelActivity: 0.8, isSelf: true },
+      { name: "H반상 (가맹 61)", isValid: true, ors: 0.35, officialAssets: 25, recency60d: 14, channelActivity: 2.7 },
+      { name: "진미푸드 (가맹 48)", isValid: true, ors: 0.31, officialAssets: 20, recency60d: 10, channelActivity: 2.1 },
     ],
     competitorGapAvailable: true,
     activity60d: 2, activity120d: 6, lastContentAt: "2026-07-10",
@@ -195,8 +195,8 @@ export const reviewItems: ReviewItem[] = [
       asset("cafe", "본가한상 창업 문의드려요", "2026-06-28"),
     ],
     contactPages: [
-      { path: "/franchise", label: "가맹 문의", confidence: 0.93 },
-      { path: "/company", label: "회사 소개", confidence: 0.58 },
+      { id: "cp-8", url: "https://example.kr/franchise", path: "/franchise", label: "가맹 문의", confidence: 0.93 },
+      { id: "cp-9", url: "https://example.kr/company", path: "/company", label: "회사 소개", confidence: 0.58 },
     ],
     primaryService: "가맹 모집 콘텐츠 캠페인",
     secondaryServices: ["뉴스 보도자료 배포", "창업 카페 운영"],
@@ -214,8 +214,8 @@ export const reviewItems: ReviewItem[] = [
       "교차 확인 2원",
     ],
     weaknesses: [
-      { kind: "channel_single", label: "채널 다양성 1종", severity: "high" },
-      { kind: "ors_gap", label: "웹문서 회수 격차", severity: "mid", metric: "5 vs 17" },
+      { kind: "channel_single", label: "채널 다양성 1종", severity: "strong" },
+      { kind: "ors_gap", label: "웹문서 회수 격차", severity: "medium", metric: "5 vs 17" },
     ],
     ors: [
       { channel: "blog", count: 15, competitorMedian: 33 },
@@ -225,9 +225,9 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "수앤미의원", ors: 0.17, officialAssets: 16, recency60d: 6, channelActivity: 1.2, isSelf: true },
-      { name: "오션스킨의원", ors: 0.36, officialAssets: 27, recency60d: 13, channelActivity: 2.5 },
-      { name: "센텀더마", ors: 0.24, officialAssets: 19, recency60d: 8, channelActivity: 1.8 },
+      { name: "수앤미의원", isValid: true, ors: 0.17, officialAssets: 16, recency60d: 6, channelActivity: 1.2, isSelf: true },
+      { name: "오션스킨의원", isValid: true, ors: 0.36, officialAssets: 27, recency60d: 13, channelActivity: 2.5 },
+      { name: "센텀더마", isValid: true, ors: 0.24, officialAssets: 19, recency60d: 8, channelActivity: 1.8 },
     ],
     competitorGapAvailable: true,
     activity60d: 6, activity120d: 14, lastContentAt: "2026-07-21",
@@ -236,7 +236,7 @@ export const reviewItems: ReviewItem[] = [
       asset("blog", "휴가철 예약 안내", "2026-07-05", true),
     ],
     contactPages: [
-      { path: "/contact", label: "문의", confidence: 0.86 },
+      { id: "cp-10", url: "https://example.kr/contact", path: "/contact", label: "문의", confidence: 0.86 },
     ],
     primaryService: "채널 다각화 (카페·웹문서)",
     secondaryServices: ["블로그 상위 콘텐츠 보강"],
@@ -254,8 +254,8 @@ export const reviewItems: ReviewItem[] = [
       "플레이스만 활성",
     ],
     weaknesses: [
-      { kind: "no_homepage", label: "홈페이지 확인 불가", severity: "high" },
-      { kind: "no_recent_content", label: "최근 60일 발행 0건", severity: "high", metric: "0건/60일" },
+      { kind: "no_homepage", label: "홈페이지 확인 불가", severity: "strong" },
+      { kind: "no_recent_content", label: "최근 60일 발행 0건", severity: "strong", metric: "0건/60일" },
     ],
     ors: [
       { channel: "blog", count: 4, competitorMedian: 27 },
@@ -265,8 +265,8 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "화이트리버치과", ors: 0.1, officialAssets: 5, recency60d: 0, channelActivity: 0.4, isSelf: true },
-      { name: "수성탑치과", ors: 0.4, officialAssets: 24, recency60d: 12, channelActivity: 2.6 },
+      { name: "화이트리버치과", isValid: true, ors: 0.1, officialAssets: 5, recency60d: 0, channelActivity: 0.4, isSelf: true },
+      { name: "수성탑치과", isValid: true, ors: 0.4, officialAssets: 24, recency60d: 12, channelActivity: 2.6 },
     ],
     competitorGapAvailable: false,
     activity60d: 0, activity120d: 3, lastContentAt: "2026-03-28",
@@ -275,7 +275,7 @@ export const reviewItems: ReviewItem[] = [
       asset("blog", "3월 진료 일정 안내", "2026-03-28", true),
     ],
     contactPages: [
-      { path: "/board/notice", label: "공지사항", confidence: 0.41 },
+      { id: "cp-11", url: "https://example.kr/board/notice", path: "/board/notice", label: "공지사항", confidence: 0.41 },
     ],
     primaryService: "홈페이지 신규 구축",
     secondaryServices: ["블로그 개설·운영"],
@@ -293,8 +293,8 @@ export const reviewItems: ReviewItem[] = [
       "공정위 정보 등록 일치",
     ],
     weaknesses: [
-      { kind: "channel_inactive", label: "본사 채널 비활성", severity: "high" },
-      { kind: "no_place", label: "본사 플레이스 미등록", severity: "mid" },
+      { kind: "channel_inactive", label: "본사 채널 비활성", severity: "strong" },
+      { kind: "no_place", label: "본사 플레이스 미등록", severity: "medium" },
     ],
     ors: [
       { channel: "blog", count: 6, competitorMedian: 24 },
@@ -304,9 +304,9 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "동네닭집", ors: 0.13, officialAssets: 8, recency60d: 2, channelActivity: 0.7, isSelf: true },
-      { name: "치킨훠궈 (가맹 55)", ors: 0.3, officialAssets: 21, recency60d: 11, channelActivity: 2.3 },
-      { name: "바삭공방 (가맹 39)", ors: 0.26, officialAssets: 17, recency60d: 9, channelActivity: 1.9 },
+      { name: "동네닭집", isValid: true, ors: 0.13, officialAssets: 8, recency60d: 2, channelActivity: 0.7, isSelf: true },
+      { name: "치킨훠궈 (가맹 55)", isValid: true, ors: 0.3, officialAssets: 21, recency60d: 11, channelActivity: 2.3 },
+      { name: "바삭공방 (가맹 39)", isValid: true, ors: 0.26, officialAssets: 17, recency60d: 9, channelActivity: 1.9 },
     ],
     competitorGapAvailable: true,
     activity60d: 2, activity120d: 7, lastContentAt: "2026-07-08",
@@ -315,7 +315,7 @@ export const reviewItems: ReviewItem[] = [
       asset("blog", "동네닭집 여름 신메뉴", "2026-06-30", true),
     ],
     contactPages: [
-      { path: "/partner", label: "가맹 안내", confidence: 0.89 },
+      { id: "cp-12", url: "https://example.kr/partner", path: "/partner", label: "가맹 안내", confidence: 0.89 },
     ],
     primaryService: "본사 공식 채널 운영 대행",
     secondaryServices: ["가맹 모집 콘텐츠"],
@@ -333,7 +333,7 @@ export const reviewItems: ReviewItem[] = [
       "3원 교차 확인",
     ],
     weaknesses: [
-      { kind: "activity_drop", label: "최근 60일 발행 급감", severity: "mid", metric: "12→2건" },
+      { kind: "activity_drop", label: "최근 60일 발행 급감", severity: "medium", metric: "12→2건" },
     ],
     ors: [
       { channel: "blog", count: 19, competitorMedian: 47 },
@@ -343,9 +343,9 @@ export const reviewItems: ReviewItem[] = [
     ],
     orsScored: false,
     competitors: [
-      { name: "리즈온의원", ors: 0.19, officialAssets: 21, recency60d: 2, channelActivity: 1.4, isSelf: true },
-      { name: "V라인의원 (교대)", ors: 0.33, officialAssets: 30, recency60d: 14, channelActivity: 2.8 },
-      { name: "미엘클리닉 (방배)", ors: 0.25, officialAssets: 23, recency60d: 10, channelActivity: 2.0 },
+      { name: "리즈온의원", isValid: true, ors: 0.19, officialAssets: 21, recency60d: 2, channelActivity: 1.4, isSelf: true },
+      { name: "V라인의원 (교대)", isValid: true, ors: 0.33, officialAssets: 30, recency60d: 14, channelActivity: 2.8 },
+      { name: "미엘클리닉 (방배)", isValid: true, ors: 0.25, officialAssets: 23, recency60d: 10, channelActivity: 2.0 },
     ],
     competitorGapAvailable: true,
     activity60d: 2, activity120d: 14, lastContentAt: "2026-07-18",
@@ -354,8 +354,8 @@ export const reviewItems: ReviewItem[] = [
       asset("web", "리즈온의원 오시는 길", "2026-05-30", true),
     ],
     contactPages: [
-      { path: "/reservation", label: "상담 예약", confidence: 0.9 },
-      { path: "/about", label: "병원 소개", confidence: 0.6 },
+      { id: "cp-13", url: "https://example.kr/reservation", path: "/reservation", label: "상담 예약", confidence: 0.9 },
+      { id: "cp-14", url: "https://example.kr/about", path: "/about", label: "병원 소개", confidence: 0.6 },
     ],
     primaryService: "콘텐츠 발행 정례화 운영",
     secondaryServices: ["기존 콘텐츠 리프레시"],

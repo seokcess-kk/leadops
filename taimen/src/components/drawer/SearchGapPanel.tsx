@@ -22,7 +22,7 @@ export function SearchGapPanel({
   placeRegistered: boolean;
   orsScored: boolean;
 }) {
-  const max = Math.max(...channels.map((c) => Math.max(c.count, c.competitorMedian)), 1);
+  const max = Math.max(...channels.map((c) => Math.max(c.count, c.competitorMedian ?? 0)), 1);
 
   return (
     <div className="flex flex-col gap-3">
@@ -38,7 +38,11 @@ export function SearchGapPanel({
 
       <div className="flex flex-col gap-2.5">
         {channels.map((ch) => {
-          const gap = ch.competitorMedian > 0 ? Math.round((ch.count / ch.competitorMedian) * 100) : 100;
+          // ❗ 경쟁 중앙값을 모르면 격차를 계산하지 않는다. 0 으로 두면 없는 격차가 생긴다.
+          const gap =
+            ch.competitorMedian !== null && ch.competitorMedian > 0
+              ? Math.round((ch.count / ch.competitorMedian) * 100)
+              : null;
           return (
             <div key={ch.channel} className="flex items-center gap-3">
               <span className="mono-label w-[44px] shrink-0 text-[9px]">{CHANNEL_LABEL[ch.channel]}</span>
@@ -49,20 +53,20 @@ export function SearchGapPanel({
                 <div className="h-[5px] overflow-hidden rounded-[1px] bg-surface">
                   <div
                     className="h-full bg-violet-bright"
-                    style={{ width: `${(ch.competitorMedian / max) * 100}%` }}
+                    style={{ width: `${((ch.competitorMedian ?? 0) / max) * 100}%` }}
                   />
                 </div>
               </div>
               <span className="w-[86px] shrink-0 text-right font-mono text-[11px] tabular-nums text-fg-3">
                 {ch.count}
-                <span className="text-fg-2"> vs {ch.competitorMedian}</span>
+                <span className="text-fg-2"> vs {ch.competitorMedian ?? "—"}</span>
               </span>
               <span
                 className={`w-[42px] shrink-0 text-right font-mono text-[11px] font-semibold tabular-nums ${
-                  gap < 30 ? "text-violet-bright" : "text-fg-2"
+                  gap !== null && gap < 30 ? "text-violet-bright" : "text-fg-2"
                 }`}
               >
-                {gap}%
+                {gap === null ? "—" : `${gap}%`}
               </span>
             </div>
           );
