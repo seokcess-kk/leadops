@@ -254,9 +254,28 @@ describe("computeMetrics — M2 정밀도·재현율", () => {
     expect(metric(metrics, "M2-재현율").proportion?.denominator).toBe(3);
   });
 
-  it("매칭이 없으면 미측정이다 (파이프라인 미실행)", () => {
-    const { metrics } = computeMetrics(rows, new Map());
-    expect(metric(metrics, "M2-정밀도").unmeasured).toMatch(/파이프라인 미실행/);
+  /**
+   * ❗ 미측정 사유를 구분한다. 라벨이 없어서 못 재는 것과 파이프라인이 판정을 못 한 것은
+   *    대응이 완전히 다르다 (라벨링 vs 소스 보강). 실측 중에 "파이프라인 미실행?" 이
+   *    실제로 돌린 실행에 붙는 것을 겪었다.
+   */
+  it("라벨이 없으면 그 사유를 말한다", () => {
+    const unlabelled = [row("a"), row("b")];
+    const { metrics } = computeMetrics(unlabelled, verdicts);
+    expect(metric(metrics, "M2-정밀도").unmeasured).toMatch(/label_official_status/);
+  });
+
+  it("라벨은 있는데 판정이 없으면 판정 건수를 함께 말한다", () => {
+    // URL 이 없어 판정하지 못한 상태 (officialJudged=null).
+    const unjudged = new Map<string, SystemVerdict>(
+      rows.map((r) => [verdictKey("hira", r.externalId), verdict({ hasWebsite: false, officialJudged: null })]),
+    );
+    const { metrics } = computeMetrics(rows, unjudged);
+    const why = metric(metrics, "M2-정밀도").unmeasured!;
+    expect(why).toMatch(/라벨은 5건/);
+    expect(why).toMatch(/판정 0건/);
+    // 재현율도 같은 사유를 쓴다 — 한쪽만 정확하면 다른 쪽을 오해한다.
+    expect(metric(metrics, "M2-재현율").unmeasured).toBe(why);
   });
 });
 

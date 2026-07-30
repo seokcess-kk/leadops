@@ -356,8 +356,17 @@ export function computeMetrics(
   const fn = m2Rows.filter((r) => sys(r)!.officialJudged === false && labelledOfficial(r) === true).length;
 
   if (m2Rows.length === 0) {
-    metrics.push(unmeasured("M2-정밀도", "공식 판별 정밀도", "판정된 표본이 없습니다 (파이프라인 미실행?)", "≥ 0.90"));
-    metrics.push(unmeasured("M2-재현율", "공식 판별 재현율", "판정된 표본이 없습니다", "≥ 0.75"));
+    // ❗ 사유를 구분한다. 라벨이 없어서 못 재는 것과 파이프라인이 판정을 못 한 것은
+    //    대응이 완전히 다르다 (라벨링 vs 소스 보강). "파이프라인 미실행?" 을 뭉뚱그려
+    //    붙이면 실제로 돌렸는데 안 돌렸다고 읽는다 — 실측 중에 겪었다.
+    const judged = matched.filter((r) => sys(r)!.officialJudged !== null).length;
+    const why =
+      m1Rows.length === 0
+        ? "label_official_status 가 비어 있습니다"
+        : `라벨은 ${m1Rows.length}건 있으나 그중 파이프라인이 판정한 건이 없습니다 ` +
+          `(전체 매칭 ${matched.length}건 중 판정 ${judged}건 — URL 이 없으면 판정하지 못한다)`;
+    metrics.push(unmeasured("M2-정밀도", "공식 판별 정밀도", why, "≥ 0.90"));
+    metrics.push(unmeasured("M2-재현율", "공식 판별 재현율", why, "≥ 0.75"));
   } else {
     metrics.push({
       id: "M2-정밀도",
