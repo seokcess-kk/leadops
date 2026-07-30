@@ -1,0 +1,271 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# 같은 브랜치에 새 push 가 오면 이전 실행을 취소한다. E2E 가 느려서 큐가 쌓이면
+# 피드백이 늦어지고, 낡은 결과를 기다릴 이유가 없다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ❗ 부팅 시 Zod 로 검증되는 값들. 설정하지 않으면 `getEnv()` 를 부르는 코드가 죽는다.
+  #    CI 에서는 외부 API 를 쓰지 않으므로 mock·off 로 고정한다 (키가 필요 없다).
+  FEATURE_SOURCE: mock
+  FEATURE_ORS: "off"
+  FEATURE_LLM: "off"
+  HTTP_USER_AGENT: "LeadOpsCI/1.0 (+https://example.kr/bot; contact@example.kr)"
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────
+  # 타입 검사 + 단위 테스트 + DB 통합 테스트
+  #
+  # ❗ DB 테스트는 **실제 Postgres** 를 쓴다. RLS·plpgsql·행 잠금·복합 FK 는 흉내 낼 수
+  #    없고, 흉내 낸 것으로 통과시키면 검증한 것이 아니다 (README).
+  # ────────────────────────────────────────────────────────────────────────
+  verify:
+    name: typecheck · 단위 · DB 통합
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: leadops
+          POSTGRES_DB: leadops
+        # ❗ 55432 로 매핑한다. `testDb.ts` 의 `DEFAULT_ADMIN_URL` 이 그 포트를 기대하므로
+        #    여기서 맞춰 두면 테스트에 CI 전용 환경변수를 넣지 않아도 된다.
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # ❗ `pg_isready` 만으로는 부족하다. initdb 가 재시작하는 사이에도 ready 를 답할 수
+      #    있어서, 그 틈에 `create database` 가 실패한다 (로컬에서 실제로 한 번 겪었다).
+      #    소켓이 아니라 **질의**로 확인한다.
+      - name: Postgres 준비 확인
+        run: |
+          for _ in $(seq 1 30); do
+            if PGPASSWORD=leadops psql -h 127.0.0.1 -p 55432 -U postgres -d postgres -c 'select 1' >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres 가 질의를 받지 못했습니다" >&2
+          exit 1
+
+      - name: typecheck (루트)
+        run: pnpm typecheck
+
+      - name: 단위·통합 테스트
+        run: pnpm test
+
+      - name: DB 통합 테스트
+        run: pnpm test:db
+
+  # ────────────────────────────────────────────────────────────────────────
+  # taimen 은 **상위 워크스페이스에 속하지 않는다** (`taimen/pnpm-workspace.yaml` 이 경계).
+  # 루트 install 로는 UI 의존성이 깔리지 않으므로 별도 잡으로 둔다.
+  # ────────────────────────────────────────────────────────────────────────
+  taimen:
+    name: taimen typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: taimen/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: taimen
+
+      - run: pnpm typecheck
+        working-directory: taimen
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Playwright E2E (Phase 6 완료 기준)
+  #
+  # ⚠️ **네트워크가 필요하다.** MX 검증을 흉내 내지 않기 때문이다 — 승인 게이트의 핵심이라
+  #    가짜 리졸버로 통과시키면 검증한 것이 아니다. 외부 DNS 가 막힌 러너에서는
+  #    `LEADOPS_E2E_MX_DOMAIN` 으로 사내에서 해석되는 도메인을 지정한다.
+  # ────────────────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: leadops
+          POSTGRES_DB: leadops
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Postgres 준비 확인
+        run: |
+          for _ in $(seq 1 30); do
+            if PGPASSWORD=leadops psql -h 127.0.0.1 -p 55432 -U postgres -d postgres -c 'select 1' >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres 가 질의를 받지 못했습니다" >&2
+          exit 1
+
+      - name: 루트 의존성 (API · 파이프라인 · E2E 하네스)
+        run: pnpm install --frozen-lockfile
+
+      # ❗ globalSetup 이 `pnpm dev` 로 taimen 을 띄운다. 여기서 설치하지 않으면 서버가
+      #    기동 전에 죽고, 에러 메시지만 보면 원인이 CI 설정인지 코드인지 알 수 없다.
+      - name: taimen 의존성 (E2E 가 dev 서버를 띄운다)
+        run: pnpm install --frozen-lockfile
+        working-directory: taimen
+
+      # 브라우저 바이너리는 버전에 묶여 있으므로 lockfile 해시로 캐시한다.
+      - name: Playwright 브라우저 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Playwright chromium 설치
+        run: pnpm --filter @leadops/e2e exec playwright install --with-deps chromium
+
+      - name: DNS 확인 (MX 를 흉내 내지 않으므로 선행 조건이다)
+        run: |
+          node -e "
+            const dns = require('node:dns/promises');
+            const host = process.env.LEADOPS_E2E_MX_DOMAIN || 'naver.com';
+            dns.resolveMx(host)
+              .then((r) => { console.log(host, 'MX', r.length, '건'); })
+              .catch((e) => {
+                console.error('MX 조회 실패:', host, e.code);
+                console.error('E2E 는 실제 DNS 로 MX 를 검증합니다. 러너에서 외부 DNS 가 막혀 있으면');
+                console.error('LEADOPS_E2E_MX_DOMAIN 으로 해석 가능한 도메인을 지정하세요.');
+                process.exit(1);
+              });
+          "
+
+      - name: E2E
+        run: pnpm e2e
+
+      # 실패했을 때만 올린다. trace·스크린샷이 커서 매번 올리면 저장소 용량을 먹는다.
+      - name: Playwright 리포트 (실패 시)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/e2e/playwright-report/
+            apps/e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 백업·복구 리허설 (Phase 7 완료 기준)
+  #
+  # ❗ **복원해 보지 않은 백업은 백업이 아니다.** 스키마·RLS·GRANT 를 바꾸는 PR 이
+  #    복원 가능성을 깨뜨리지 않았는지 매번 확인한다.
+  #
+  # 서비스 컨테이너로는 안 된다 — 스크립트가 `docker exec` 로 컨테이너 안의 pg_dump 를
+  # 쓰므로 컨테이너 이름이 필요하다. 그래서 `pnpm db:up` 으로 직접 띄운다.
+  # ────────────────────────────────────────────────────────────────────────
+  restore-rehearsal:
+    name: 백업·복구 리허설
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Postgres 기동
+        run: |
+          pnpm db:up
+          for _ in $(seq 1 30); do
+            if docker exec leadops-pg pg_isready -U postgres >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres 가 기동하지 않았습니다" >&2
+          docker logs leadops-pg >&2
+          exit 1
+
+      - name: 마이그레이션
+        run: pnpm db:migrate --bootstrap
+        env:
+          DATABASE_URL: postgres://postgres:leadops@127.0.0.1:55432/leadops
+
+      # 빈 DB 를 복원해도 통과하므로, 실제 행이 있는 상태에서 대조해야 의미가 있다.
+      #
+      # ❗ `--limit 20` 이다. mock 어댑터의 홈페이지 도메인은 실재하지 않아 스테이지가
+      #    도메인마다 DNS·robots 를 시도하고, 기본값 500 이면 몇 분을 쓴다. 리허설이
+      #    검증하는 것은 "행이 그대로 복원되는가" 이므로 모집단 크기는 무관하다.
+      - name: 시드 (mock 파이프라인 1회)
+        run: |
+          docker exec leadops-pg psql -U postgres -d leadops \
+            -c "alter role leadops_worker with login password 'ci-worker-pw';"
+          pnpm worker run --industry=derm --limit 20
+        env:
+          DATABASE_URL: postgres://postgres:leadops@127.0.0.1:55432/leadops
+          WORKER_DATABASE_URL: postgres://leadops_worker:ci-worker-pw@127.0.0.1:55432/leadops
+
+      - name: 복구 리허설
+        run: bash scripts/restore-rehearsal.sh
+
+      - name: 정리
+        if: always()
+        run: pnpm db:down || true
