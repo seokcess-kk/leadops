@@ -1,10 +1,13 @@
 import { channelStage } from "./channel";
+import { competitorAnalyzeStage, competitorSelectStage } from "./competitor";
 import { collectStage } from "./collect";
 import { contactPagesStage } from "./contactPages";
 import { excludeStage } from "./exclude";
 import { homepageStage } from "./homepage";
 import { normalizeStage } from "./normalize";
+import { scoreStage } from "./score";
 import { searchStage } from "./search";
+import { recommendStage, shortlistStage } from "./shortlist";
 import type { StageHandler } from "./types";
 
 export * from "./types";
@@ -15,13 +18,17 @@ export * from "./homepage";
 export * from "./contactPages";
 export * from "./channel";
 export * from "./search";
+export * from "./competitor";
+export * from "./score";
+export * from "./shortlist";
 
 /**
  * 스테이지 레지스트리.
  *
- * Phase 4 범위: 수집 → 정규화 → 기본 제외 → 홈페이지 판별 → 연락처 페이지
- *                → 채널 활성도 · 검색 분석(ORS).
- * 이후 단계(경쟁사·점수·추천)는 Phase 5 에서 여기에 추가한다.
+ * Phase 5 범위: 수집 → 정규화 → 기본 제외 → 홈페이지 판별 → 연락처 페이지
+ *                → 채널 활성도 · 검색 분석(ORS) · 경쟁사 선정·비교
+ *                → 3축 점수 → 추천 · 검수 후보 확정
+ * 남은 것은 검수 API·대시보드 연동(Phase 6)과 스케줄러(Phase 7)다.
  */
 export const STAGES: readonly StageHandler[] = [
   collectStage,
@@ -31,6 +38,11 @@ export const STAGES: readonly StageHandler[] = [
   contactPagesStage,
   channelStage,
   searchStage,
+  competitorSelectStage,
+  competitorAnalyzeStage,
+  scoreStage,
+  recommendStage,
+  shortlistStage,
 ];
 
 export function stageByName(name: string): StageHandler {

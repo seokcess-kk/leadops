@@ -14,8 +14,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["packages/*/src/**/*.pg.test.ts", "apps/*/src/**/*.pg.test.ts"],
-    testTimeout: 60_000,
-    hookTimeout: 60_000,
+    testTimeout: 180_000,
+    hookTimeout: 180_000,
     // 각 파일이 자기 데이터베이스를 만들지만, 동시 승인 테스트가 시계에 민감하므로
     // 파일 단위 병렬만 허용하고 파일 내부는 순차 실행한다.
     fileParallelism: true,

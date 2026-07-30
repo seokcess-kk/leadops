@@ -1,7 +1,7 @@
 import { configError, type Logger } from "@leadops/core";
 import type { SearchAdapter, SourceAdapter } from "@leadops/adapters";
 import type { HttpClient, RobotsGate } from "@leadops/http";
-import type { Sql } from "postgres";
+import type { JSONValue, Sql } from "postgres";
 
 /**
  * 스테이지 계약 (설계서 5.3 DAG).
@@ -72,6 +72,17 @@ export function requireFetching(ctx: StageContext, stage: string): FetchingStage
     });
   }
   return ctx as FetchingStageContext;
+}
+
+/**
+ * jsonb 파라미터로 넘길 순수 JSON 으로 만든다.
+ *
+ * `undefined` 필드를 떨어뜨리고 Date 같은 값을 문자열로 정규화한다 — jsonb 가 표현할 수
+ * 없는 것을 그대로 넘기면 조용히 이상한 값이 저장된다. 읽기 전용 인터페이스를
+ * `sql.json()` 에 바로 넘길 수 없는 타입 문제도 여기서 함께 해결한다.
+ */
+export function toJson(value: unknown): JSONValue {
+  return JSON.parse(JSON.stringify(value ?? null)) as JSONValue;
 }
 
 export const emptyResult = (): StageResult => ({ processed: 0, passed: 0, skipped: {} });

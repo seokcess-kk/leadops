@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Worker } from "./loop";
 
 /**
- * Phase 4 E2E — 실행 생성부터 채널·검색 분석까지 7개 스테이지 전 구간.
+ * Phase 5 E2E — 실행 생성부터 검수 후보 확정까지 12개 스테이지 전 구간.
  *
  * ❗ 워커는 **실제 leadops_worker 로그인 역할**로 접속한다.
  *    소유자 커넥션으로 돌리면 권한 모델이 검증되지 않는다.
@@ -61,7 +61,7 @@ afterAll(async () => {
   await db?.close();
 });
 
-describe("전체 파이프라인 — 7개 스테이지", () => {
+describe("전체 파이프라인 — 12개 스테이지", () => {
   it("❗ 실행을 만들고 큐를 비우면 업체가 적재된다", async () => {
     const { runId, attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
@@ -72,8 +72,8 @@ describe("전체 파이프라인 — 7개 스테이지", () => {
     });
 
     const handled = await makeWorker().drain(50);
-    // collect 2 + normalize·exclude_basic·homepage_detect·contact_pages·channel_analyze·search_analyze 각 1
-    expect(handled).toBe(8);
+    // collect 2 + 나머지 11개 스테이지 각 1
+    expect(handled).toBe(13);
 
     const [rawRow] = await db.owner<{ n: string }[]>`
       select count(*)::text as n from raw_candidates where attempt_id = ${attemptId}
@@ -106,6 +106,31 @@ describe("전체 파이프라인 — 7개 스테이지", () => {
     expect(byStage.get("contact_pages")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
     expect(byStage.get("channel_analyze")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
     expect(byStage.get("search_analyze")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("competitor_select")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("competitor_analyze")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("score")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("recommend")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+    expect(byStage.get("shortlist")).toMatchObject({ status: "succeeded", total: 1, done: 1 });
+  });
+
+  it("❗ 홈페이지를 확인하지 못하면 게이트를 통과하지 못한다", async () => {
+    // 목업 홈페이지는 전부 도달 불가라 official_status 가 unavailable 이다.
+    // 그 상태로 리드가 만들어지면 안 된다.
+    const [row] = await db.owner<Array<{ n: string; passed: string }>>`
+      select count(*)::text as n, count(*) filter (where gate_passed)::text as passed from scores
+    `;
+    expect(Number(row!.n)).toBeGreaterThan(0);
+    expect(row!.passed).toBe("0");
+
+    const [reason] = await db.owner<Array<{ gate_reason: string }>>`
+      select gate_reason from scores where gate_reason is not null limit 1
+    `;
+    expect(reason!.gate_reason).toContain("official_status=unavailable");
+  });
+
+  it("검수 후보가 만들어지지 않는다 (통과 0건)", async () => {
+    const [row] = await db.owner<Array<{ n: string }>>`select count(*)::text as n from review_items`;
+    expect(row!.n).toBe("0");
   });
 
   it("❗ 검색 어댑터가 없어도 실행이 성공으로 끝난다 (ORS 없는 축소 파이프라인)", async () => {
