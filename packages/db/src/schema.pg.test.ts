@@ -32,6 +32,7 @@ describe("마이그레이션", () => {
       "0007_raw_candidates.sql",
       "0008_channel_saturation.sql",
       "0009_collection_scope.sql",
+      "0010_verify_contact_email.sql",
     ]);
   });
 
@@ -118,6 +119,17 @@ describe("❗ P1 완료 기준: RLS 린트", () => {
         and table_schema = 'public'
         and table_name in ('approval_counters', 'approval_day_totals', 'review_view_nonces',
                            'manual_entry_events', 'http_cache', 'outbox')
+    `;
+    expect(rows).toEqual([]);
+  });
+
+  it("❗ authenticated 는 MX 검증 함수를 실행할 수 없다 (승인 게이트 우회 차단)", async () => {
+    // 이 함수를 주면 검수자가 스스로 mx_ok 를 참으로 만들 수 있고,
+    // decide_review_item 의 `mx_ok is true` 조건이 무의미해진다.
+    const rows = await db.owner<{ grantee: string }[]>`
+      select grantee from information_schema.role_routine_grants
+      where routine_name = 'verify_contact_email' and specific_schema = 'public'
+        and grantee in ('authenticated', 'anon', 'PUBLIC')
     `;
     expect(rows).toEqual([]);
   });

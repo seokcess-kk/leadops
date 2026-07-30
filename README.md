@@ -3,8 +3,8 @@
 마케팅 에이전시 내부용 리드 발굴 도구. 검색 수요는 있으나 검색 결과물·콘텐츠 점유가
 경쟁사보다 부족한 업체를 찾아 영업 가치가 높은 리드만 선별한다.
 
-> **현재 상태: Phase 5 완료 (경쟁사·3축 점수·추천·검수 후보)**
-> 설계서 `docs/00-plan.md` v3 기준. 검수 API·대시보드 연동부터는 아직 없다.
+> **현재 상태: Phase 6 진행 (검수 API·MX 검증 완료 / taimen 연동 미완)**
+> 설계서 `docs/00-plan.md` v3 기준. API 는 동작하고, UI 는 아직 fixture 모드다.
 
 ## 문서
 
@@ -26,7 +26,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 602 단위 + 181 DB 테스트
+pnpm verify               # typecheck + 633 단위 + 214 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -54,8 +54,10 @@ packages/pipeline   정규화 · 중복 제거 · 제외 규칙 · HTML 스캐�
                     공식 홈페이지 판정 · 연락처 페이지 탐지 · 채널 발견 · 활성도 산출 ·
                     키워드 생성 · ORS 산출 · 쿼터 가드 · 경쟁사 매칭 · 취약점 등급 ·
                     3축 점수 · 게이트 · 추천 매핑 · 스테이지 · 오케스트레이션
+apps/api            검수 API (JWT 검증 · RLS 세션 · MX 게이트 · 에러 봉투)
 apps/worker         잡 루프 (fencing · heartbeat · 안전 종료)
 apps/spike          Phase 0 스파이크 CLI (DB 없이 동작)
+taimen/             검수 콘솔 UI (Next.js 16 · 아직 fixture 모드)
 ```
 
 ### DB 계층 (packages/db)
@@ -72,6 +74,7 @@ apps/spike          Phase 0 스파이크 CLI (DB 없이 동작)
 | `0007_raw_candidates` | 수집 원본 (7일 보관) |
 | `0008_channel_saturation` | 피드 포화 표시 · ORS 분모 0 허용 |
 | `0009_collection_scope` | 수집 범위 설정 (`hira_scope`) |
+| `0010_verify_contact_email` | MX 검증 결과 기록 RPC (서버 전용) |
 
 **최초 admin 부트스트랩** (배포 runbook): DB 소유자가 직접 승격한다.
 ```sql
@@ -138,6 +141,13 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 | 같은 관측이면 같은 점수가 나온다 (재현성) | `scoring.test.ts` · `score_inputs` 로 관측 버전 고정 |
 | 추천 서비스는 **규칙이 고른다** (LLM 은 문장 정리만) | `recommend.ts` — `rationale_source = 'rule'` |
 | 스테이지 순회가 무한 루프에 빠지지 않는다 (처리 못 한 행이 다시 잡히지 않음) | offset 순회 — `score`·`competitor_select`·`recommend` |
+| **MX 검증 결과를 `authenticated` 가 쓸 수 없다** (승인 게이트 우회 차단) | 마이그레이션 0010 + `schema.pg.test.ts` + `api.pg.test.ts` |
+| JWT `alg` 혼동·서명 위조·만료·비 UUID `sub` 가 모두 막힌다 | `apps/api/src/jwt.test.ts` — 19개 |
+| 사용자 id 는 요청 컨텍스트로만 흐른다 (동시 요청이 섞이지 않는다) | `Ctx.userId` — 공유 변수 금지 |
+| 인증은 라우팅보다 **먼저** 통과한다 (라우트마다 검사하면 빠뜨린다) | `apps/api/src/server.ts` |
+| 알 수 없는 오류를 4xx 로 내리지 않는다 (규칙 위반과 버그를 섞지 않는다) | `toApiError` — 목록에 없으면 500 |
+| SMTP 프로빙을 하지 않는다 · null MX 는 거부한다 | `packages/http/src/mx.ts` |
+| 일괄 처리에 **승인 경로가 없다** | `stages`/API 양쪽 — `bulk-decision` 은 제외만 |
 | `NODE_ENV=production` 에서 mock 어댑터는 부팅을 막는다 | 같은 파일 |
 | ORS(네이버)는 자격증명 없이 켤 수 없다 | 같은 파일 |
 | 승인되지 않은 데이터 소스는 어댑터가 실행을 거부한다 | `packages/core/src/sourceRegistry.ts` |
@@ -355,12 +365,58 @@ v2 는 조건을 `axis_problem < 32` 로 걸었는데 게이트 통과 후보는
 가장 큰 문제 항목에서 주력 1개, 차순위에서 보조 최대 2개를 고른다.
 **언어 모델은 선정이 아니라 문장 정리에만 쓴다** — `FEATURE_LLM=off` 로 전체가 동작한다.
 
+## 검수 API (Phase 6)
+
+```
+GET  /api/review              검수 후보 목록
+GET  /api/review/:id          상세 + 1회용 nonce 발급
+POST /api/review/:id/contact-email   연락처 수동 입력 → 문법·DNS·MX
+POST /api/review/:id/decision        승인·제외 (승인은 emailId 필수)
+POST /api/review/bulk-decision       일괄 **제외만**
+GET  /api/leads · /api/leads/export  목록 · export(admin 전용)
+```
+
+`pnpm api` 로 띄운다. `API_DATABASE_URL` · `SUPABASE_JWT_SECRET` 이 필요하다.
+
+### 규칙은 API 를 통과해도 유지된다
+
+API 는 **입력을 옮기고 결과를 옮길 뿐**이다. 상한·쿼터·게이트·nonce·rate limit 은 전부
+DB 안에 있고, API 를 우회해도 유지된다. 통합 테스트가 그것을 확인한다 — 일 상한을 2로
+낮추고 API 로 승인을 시도하면 `409 daily_cap_reached` 가 온다.
+
+### ❗ MX 검증 결과는 사용자가 쓸 수 없다
+
+`decide_review_item` 은 `mx_ok is true` 를 요구한다. 그런데 Supabase 모델에서
+`authenticated` 는 브라우저에서 RPC 를 직접 호출할 수 있으므로, MX 기록 함수를 그 역할에
+주면 **검수자가 스스로 게이트를 통과시킬 수 있다.**
+
+그래서 `verify_contact_email` 은 `service_role` 에만 실행권을 준다(마이그레이션 0010).
+API 서버가 직접 DNS 를 조회한 뒤 서버 권한으로 기록한다. 스키마 린트와 통합 테스트가
+`authenticated` 에 실행권이 없음을 확인한다.
+
+### JWT 는 직접 검증한다
+
+라이브러리 대신 HS256 검증을 직접 하고, **공격 케이스를 테스트로 고정**한다 —
+`alg: none`·`alg` 바꿔치기·서명 위조·페이로드 변조·만료·`nbf`·비 UUID `sub` 가 전부 막힌다.
+서명 비교는 `timingSafeEqual` 이고, `sub` 는 그대로 RLS 의 `auth.uid()` 가 되므로
+UUID 가 아니면 거절한다.
+
+### SMTP 는 쓰지 않는다
+
+문법 → DNS → MX 까지만 본다 (설계서 1.6). 상대 서버에 붙어 수신자 존재를 떠보는
+프로빙은 하지 않는다. MX 가 없으면 A/AAAA 로 implicit MX(RFC 5321)를 인정하되 신뢰도를
+낮게 기록한다 — 엄격하게 MX 만 요구하면 실제로 메일이 가는 도메인을 탈락시킨다.
+`.` 하나만 오는 null MX(RFC 7505)는 **거부**한다. 메일을 받지 않겠다는 선언이다.
+
 ## 아직 없는 것
 
-검수 API · 대시보드 연동 · 스케줄러 · 개인정보 워크플로.
+**taimen UI ↔ API 연동** · Playwright E2E · 실행/설정/업종/비용/개인정보 엔드포인트 ·
+스케줄러(pg_cron) · 개인정보 워크플로.
 
-다음은 Phase 6(검수 화면 · 연락처 수동 입력)이다. `taimen` UI 는 fixture 모드로 이미 있고,
-설계서 §7.2 API 서버를 만들어 연결하면 된다.
+다음은 **taimen 을 API 에 연결하는 일**이다. UI 는 fixture 모드로 이미 있으므로
+`store.tsx` 의 전이 함수를 위 엔드포인트 호출로 바꾸면 된다. 이때 taimen 의
+**일 상한·업종 쿼터 미강제** 문제도 함께 해소된다 — 지금은 표시만 하지만, API 를 붙이면
+DB 가 `409` 를 돌려주므로 그 상태를 화면에 옮기기만 하면 된다.
 
 다만 **Phase 2~5 의 완료 기준이 아직 미측정**이다 — 골드셋 120건이 없어
 M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) · M6(ORS 산출 가능률 ≥90%) ·

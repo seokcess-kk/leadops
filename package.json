@@ -19,7 +19,8 @@
     "db:psql": "docker exec -it leadops-pg psql -U postgres",
     "db:migrate": "tsx packages/db/src/cli.ts",
     "spike": "tsx apps/spike/src/index.ts",
-    "worker": "tsx apps/worker/src/index.ts"
+    "worker": "tsx apps/worker/src/index.ts",
+    "api": "tsx apps/api/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
@@ -31,6 +32,8 @@
     "zod": "^4.1.12"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

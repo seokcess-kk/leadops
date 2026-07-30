@@ -1,0 +1,11 @@
+{
+  "name": "@leadops/api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@leadops/core": "workspace:*",
+    "@leadops/db": "workspace:*",
+    "@leadops/http": "workspace:*",
+    "postgres": "^3.4.7"
+  }
+}

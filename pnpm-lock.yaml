@@ -25,6 +25,21 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(tsx@4.23.1)
 
+  apps/api:
+    dependencies:
+      '@leadops/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@leadops/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@leadops/http':
+        specifier: workspace:*
+        version: link:../../packages/http
+      postgres:
+        specifier: ^3.4.7
+        version: 3.4.9
+
   apps/spike:
     dependencies:
       '@leadops/adapters':
