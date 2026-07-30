@@ -36,6 +36,7 @@ describe("마이그레이션", () => {
       "0011_admin_rpcs.sql",
       "0012_ops_privacy_capacity.sql",
       "0013_fix_setting_paths.sql",
+      "0014_homepage_discovery.sql",
     ]);
   });
 

@@ -70,7 +70,9 @@ async function pool<T>(items: readonly T[], size: number, fn: (item: T) => Promi
 
 export const homepageStage: StageHandler = {
   stage: "homepage_detect",
-  dependsOn: ["exclude_basic"],
+  // ❗ 발견이 끝난 뒤에 판정한다. 순서가 뒤바뀌면 발견된 URL 이 판정 없이 남는다.
+  //    발견이 꺼져 있어도(`FEATURE_ORS=off`) 그 스테이지는 즉시 성공하므로 막히지 않는다.
+  dependsOn: ["homepage_discover"],
 
   async run(ctx: StageContext): Promise<StageResult> {
     const fetching = requireFetching(ctx, "homepage_detect");

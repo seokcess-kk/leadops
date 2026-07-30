@@ -2,12 +2,12 @@ import { MockSourceAdapter } from "@leadops/adapters";
 import { nullLogger } from "@leadops/core";
 import { createTestDb, type TestDb } from "@leadops/db";
 import { HttpClient, loopbackPolicyForTests, RobotsGate, type DnsResolver } from "@leadops/http";
-import { advanceAttempt, startRun } from "@leadops/pipeline";
+import { advanceAttempt, stageOrder, startRun } from "@leadops/pipeline";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Worker } from "./loop";
 
 /**
- * Phase 5 E2E — 실행 생성부터 검수 후보 확정까지 12개 스테이지 전 구간.
+ * Phase 5 E2E — 실행 생성부터 검수 후보 확정까지 13개 스테이지 전 구간.
  *
  * ❗ 워커는 **실제 leadops_worker 로그인 역할**로 접속한다.
  *    소유자 커넥션으로 돌리면 권한 모델이 검증되지 않는다.
@@ -61,7 +61,7 @@ afterAll(async () => {
   await db?.close();
 });
 
-describe("전체 파이프라인 — 12개 스테이지", () => {
+describe("전체 파이프라인 — 13개 스테이지", () => {
   it("❗ 실행을 만들고 큐를 비우면 업체가 적재된다", async () => {
     const { runId, attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
@@ -72,8 +72,11 @@ describe("전체 파이프라인 — 12개 스테이지", () => {
     });
 
     const handled = await makeWorker().drain(50);
-    // collect 2 + 나머지 11개 스테이지 각 1
-    expect(handled).toBe(13);
+    // ❗ 스테이지 목록에서 계산한다. 상수를 박아 두면 스테이지를 추가할 때마다
+    //    이 테스트가 "왜 틀렸는지 모를 숫자" 로 실패한다 (실제로 겪었다).
+    //    collect 는 업종당 1개, 나머지는 스테이지당 1개다.
+    const industries = 2;
+    expect(handled).toBe(stageOrder().length - 1 + industries);
 
     const [rawRow] = await db.owner<{ n: string }[]>`
       select count(*)::text as n from raw_candidates where attempt_id = ${attemptId}
