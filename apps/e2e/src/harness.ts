@@ -29,13 +29,19 @@ export interface Managed {
 /**
  * 자식 프로세스를 띄우고 출력을 모은다.
  *
- * ❗ Windows 에서 `pnpm` 은 `.cmd` 라 `shell: true` 가 필요하고, 그러면 자식이 손자를
- *    만든다 (`pnpm` → `node`). 그래서 종료는 PID 하나가 아니라 **트리 전체**를 죽인다.
+ * ❗ `shell: true` 라서 자식이 손자를 만든다 (`sh`/`cmd` → `node`). 그래서 종료는 PID
+ *    하나가 아니라 **트리 전체**를 죽여야 한다. 남으면 포트를 잡고 있어서 다음 실행이
+ *    실패하고, Next 는 디렉터리 단위 잠금까지 들고 있다.
+ *
+ * ❗ POSIX 에서는 `detached: true` 로 **프로세스 그룹 리더**를 만든다. 이것이 없으면
+ *    `process.kill(-pid)` 가 보낼 그룹이 없어서 셸만 죽고 node 가 고아로 남는다
+ *    (CI 러너에서 이 차이가 실패로 드러난다).
  */
 export function launch(command: string, args: string[], cwd: string, env: Record<string, string>): Managed {
   const child = spawn(command, args, {
     cwd,
     shell: true,
+    detached: process.platform !== "win32",
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -55,19 +61,33 @@ export function launch(command: string, args: string[], cwd: string, env: Record
 /** 프로세스 트리를 죽인다. 남으면 다음 실행이 포트를 못 잡는다. */
 export function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
+
   if (process.platform === "win32") {
+    // `/T` 가 자식까지, `/F` 가 강제. Windows 에는 프로세스 그룹 시그널이 없다.
     spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
     return;
   }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
+
+  // 그룹 전체에 보낸다 (`detached: true` 로 만든 그룹). 그룹이 없으면 PID 하나로 물러난다.
+  const send = (signal: NodeJS.Signals): boolean => {
     try {
-      process.kill(pid, "SIGTERM");
+      process.kill(-pid, signal);
+      return true;
     } catch {
-      // 이미 죽었다.
+      try {
+        process.kill(pid, signal);
+        return true;
+      } catch {
+        return false; // 이미 죽었다.
+      }
     }
-  }
+  };
+
+  if (!send("SIGTERM")) return;
+  // ❗ SIGKILL 로 한 번 더 확인한다. `next dev` 는 SIGTERM 을 무시하는 경우가 있고, 남으면
+  //    포트와 디렉터리 잠금을 계속 들고 있어 다음 실행이 원인 없이 실패한다.
+  //    이미 죽었으면 이 호출은 조용히 실패한다.
+  send("SIGKILL");
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

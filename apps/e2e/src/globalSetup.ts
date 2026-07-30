@@ -78,7 +78,9 @@ export default async function globalSetup(): Promise<void> {
 
   try {
     await waitForHttp(`http://127.0.0.1:${API_PORT}/health`, "검수 API", api);
-    await waitForHttp(`http://localhost:${WEB_PORT}/today`, "taimen dev 서버", web);
+    // ❗ 넉넉하게 기다린다. 이 요청이 `/today` 의 **첫 컴파일**을 촉발하는데, 캐시가 없는
+    //    CI 러너에서는 Next 16 이 여기서 1분 이상 쓴다. 짧게 두면 "기동 실패" 로 오해한다.
+    await waitForHttp(`http://localhost:${WEB_PORT}/today`, "taimen dev 서버", web, 300_000);
   } catch (err) {
     for (const pid of pids) killTree(pid);
     await db.close();
