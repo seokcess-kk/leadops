@@ -459,3 +459,441 @@ describe("응답 규약", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════
+// 운영 엔드포인트 (설계서 7.2)
+// ══════════════════════════════════════════════════════════════════════
+
+describe("실행 이력", () => {
+  let candidate: Candidate;
+
+  beforeAll(async () => {
+    candidate = await createCandidate(db, { name: "실행이력 치과" });
+  });
+
+  it("목록에 실행이 나온다", async () => {
+    const res = await call<{ data: Array<{ id: string; status: string; cost_krw: number }> }>(
+      "GET",
+      "/api/runs",
+      { token: tokenFor(userId) },
+    );
+    expect(res.status).toBe(200);
+    const row = res.body.data.find((r) => r.id === candidate.runId);
+    expect(row).toBeDefined();
+    // 비용이 없으면 null 이 아니라 0 이어야 한다 — 화면에서 "—" 와 "0원" 은 다른 뜻이다.
+    expect(row!.cost_krw).toBe(0);
+  });
+
+  it("상세는 스테이지·실패 잡·비용을 함께 준다", async () => {
+    const res = await call<{
+      data: { run: { id: string }; stages: unknown[]; failedJobs: unknown[]; costs: unknown[] };
+    }>("GET", `/api/runs/${candidate.runId}`, { token: tokenFor(userId) });
+    expect(res.status).toBe(200);
+    expect(res.body.data.run.id).toBe(candidate.runId);
+    expect(Array.isArray(res.body.data.stages)).toBe(true);
+    expect(Array.isArray(res.body.data.failedJobs)).toBe(true);
+    expect(Array.isArray(res.body.data.costs)).toBe(true);
+  });
+
+  it("없는 실행은 400 이다", async () => {
+    const res = await call("GET", "/api/runs/00000000-0000-4000-8000-000000000000", {
+      token: tokenFor(userId),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("❗ 실행 조작은 admin 전용", () => {
+  it("수동 실행은 admin 만 만들 수 있다", async () => {
+    const res = await call("POST", "/api/runs", {
+      token: tokenFor(userId),
+      body: { industries: ["dental"], limit: 10 },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("알 수 없는 업종은 거절한다", async () => {
+    const res = await call("POST", "/api/runs", {
+      token: tokenFor(adminId),
+      body: { industries: ["카페"], limit: 10 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("dryRun 은 아무것도 만들지 않고 계획만 준다", async () => {
+    const before = await db.owner<Array<{ n: number }>>`select count(*)::int as n from runs`;
+    const res = await call<{ data: { dryRun: boolean; stages: string[] } }>("POST", "/api/runs", {
+      token: tokenFor(adminId),
+      body: { industries: ["dental"], limit: 10, dryRun: true },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.dryRun).toBe(true);
+    expect(res.body.data.stages).toContain("score");
+    const after = await db.owner<Array<{ n: number }>>`select count(*)::int as n from runs`;
+    expect(after[0]!.n).toBe(before[0]!.n);
+  });
+
+  it("admin 이 수동 실행을 만들면 collect 잡이 큐에 들어간다", async () => {
+    const res = await call<{ data: { runId: string } }>("POST", "/api/runs", {
+      token: tokenFor(adminId),
+      body: { industries: ["dental", "derm"], limit: 5 },
+    });
+    expect(res.status).toBe(200);
+    const runId = res.body.data.runId;
+
+    const jobs = await db.owner<Array<{ stage: string; status: string }>>`
+      select j.stage, j.status from jobs j
+      join run_attempts a on a.id = j.attempt_id
+      where a.run_id = ${runId}
+    `;
+    expect(jobs.length).toBe(2);
+    expect(jobs.every((j) => j.stage === "collect" && j.status === "queued")).toBe(true);
+
+    // 누가 돌렸는지 남아야 한다.
+    const audit = await db.owner<Array<{ actor: string }>>`
+      select actor::text as actor from audit_log
+      where action = 'run.create' and entity_id = ${runId}
+    `;
+    expect(audit[0]!.actor).toBe(adminId);
+  });
+
+  it("❗ 재시도는 새 attempt 를 만들고 이전 점수를 무효화한다 (R2-21)", async () => {
+    const candidate = await createCandidate(db, { name: "재시도 치과" });
+    const res = await call<{ data: { attempt_id: string; jobs: number } }>(
+      "POST",
+      `/api/runs/${candidate.runId}/retry`,
+      { token: tokenFor(adminId), body: { fromStage: "score" } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.attempt_id).not.toBe(candidate.attemptId);
+
+    const [old] = await db.owner<Array<{ invalidated_at: string | null }>>`
+      select invalidated_at from scores where id = ${candidate.scoreId}
+    `;
+    expect(old!.invalidated_at).not.toBeNull();
+
+    const jobs = await db.owner<Array<{ stage: string }>>`
+      select stage from jobs where attempt_id = ${res.body.data.attempt_id}
+    `;
+    expect(jobs.map((j) => j.stage)).toEqual(["score"]);
+  });
+
+  it("알 수 없는 스테이지로는 재시도할 수 없다", async () => {
+    const candidate = await createCandidate(db, { name: "스테이지 오타 치과" });
+    const res = await call("POST", `/api/runs/${candidate.runId}/retry`, {
+      token: tokenFor(adminId),
+      body: { fromStage: "scoer" },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("❗ 이미 끝난 실행은 취소할 수 없다", async () => {
+    const candidate = await createCandidate(db, { name: "완료된 치과" });
+    await db.owner`update runs set status = 'succeeded', finished_at = now() where id = ${candidate.runId}`;
+    const res = await call("POST", `/api/runs/${candidate.runId}/cancel`, {
+      token: tokenFor(adminId),
+      body: { reason: "테스트" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("취소는 대기 중인 잡만 죽인다", async () => {
+    const candidate = await createCandidate(db, { name: "취소할 치과" });
+    await db.owner`update runs set status = 'running' where id = ${candidate.runId}`;
+    await db.owner`
+      insert into jobs (attempt_id, stage, idempotency_key, payload, status)
+      values (${candidate.attemptId}, 'score', 'score:all', '{}'::jsonb, 'queued'),
+             (${candidate.attemptId}, 'recommend', 'recommend:all', '{}'::jsonb, 'running')
+    `;
+    const res = await call<{ data: { jobs_killed: number } }>(
+      "POST",
+      `/api/runs/${candidate.runId}/cancel`,
+      { token: tokenFor(adminId), body: { reason: "예산 초과" } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.jobs_killed).toBe(1);
+
+    const jobs = await db.owner<Array<{ stage: string; status: string }>>`
+      select stage, status from jobs where attempt_id = ${candidate.attemptId} order by stage
+    `;
+    // 실행 중인 잡은 그대로 둔다 — 워커가 쓴 결과와 상태가 어긋나면 안 된다.
+    expect(jobs).toEqual([
+      { stage: "recommend", status: "running" },
+      { stage: "score", status: "dead" },
+    ]);
+  });
+});
+
+describe("설정", () => {
+  it("목록은 저장값과 실제 적용값을 함께 준다", async () => {
+    const res = await call<{
+      data: { rows: Array<{ key: string }>; effective: { scoring: { mode: string } } };
+    }>("GET", "/api/settings", { token: tokenFor(userId) });
+    expect(res.status).toBe(200);
+    expect(res.body.data.rows.map((r) => r.key)).toContain("scoring");
+    expect(res.body.data.effective.scoring.mode).toBeDefined();
+  });
+
+  it("❗ 설정 변경은 admin 전용이다", async () => {
+    const res = await call("PUT", "/api/settings/targets", {
+      token: tokenFor(userId),
+      body: { value: { final_max: 999 } },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("❗ 알 수 없는 키는 거절한다 (오타가 조용히 저장되면 안 된다)", async () => {
+    const res = await call("PUT", "/api/settings/targetz", {
+      token: tokenFor(adminId),
+      body: { value: { final_max: 10 } },
+    });
+    expect(res.status).toBe(400);
+    const rows = await db.owner`select 1 from settings where key = 'targetz'`;
+    expect(rows.length).toBe(0);
+  });
+
+  it("❗ 객체가 아닌 값은 거절한다 (파서가 전체를 기본값으로 되돌린다)", async () => {
+    for (const value of [42, "많이", [1, 2], null]) {
+      const res = await call("PUT", "/api/settings/targets", {
+        token: tokenFor(adminId),
+        body: { value },
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("admin 이 바꾸면 적용값이 함께 바뀌고 감사 로그가 남는다", async () => {
+    const [before] = await db.owner<Array<{ value: Record<string, number> }>>`
+      select value from settings where key = 'targets'
+    `;
+    const original = before!.value;
+    const next = { ...original, final_max: 42 };
+    const res = await call<{ data: { effective: { targets: { finalMax: number } } } }>(
+      "PUT",
+      "/api/settings/targets",
+      { token: tokenFor(adminId), body: { value: next } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.effective.targets.finalMax).toBe(42);
+
+    const audit = await db.owner`
+      select 1 from audit_log where entity = 'settings' and entity_id = 'targets'
+    `;
+    expect(audit.length).toBeGreaterThan(0);
+
+    // 뒤 테스트가 원래 상한을 보게 되돌린다.
+    await db.owner`update settings set value = ${db.owner.json(original)} where key = 'targets'`;
+  });
+});
+
+describe("업종·키워드", () => {
+  let candidate: Candidate;
+
+  beforeAll(async () => {
+    candidate = await createCandidate(db, { name: "키워드 치과", industry: "dental" });
+    await db.owner`
+      insert into company_keywords (company_id, keyword, kind, source, approved)
+      values (${candidate.companyId}, '강남 임플란트 후기', 'nonbrand_long', 'llm', false)
+    `;
+  });
+
+  it("업종 요약에 업체 수·키워드 수·쿼터가 나온다", async () => {
+    const res = await call<{
+      data: Array<{ industry: string; companies: number; llm_pending: number; quota: number }>;
+      meta: { quota: number };
+    }>("GET", "/api/industries", { token: tokenFor(userId) });
+    expect(res.status).toBe(200);
+    const dental = res.body.data.find((r) => r.industry === "dental");
+    expect(dental!.companies).toBeGreaterThan(0);
+    expect(dental!.llm_pending).toBeGreaterThan(0);
+    expect(res.body.meta.quota).toBeGreaterThan(0);
+  });
+
+  it("승인 대기 키워드만 걸러 볼 수 있다", async () => {
+    const res = await call<{ data: Array<{ keyword: string; approved: boolean }> }>(
+      "GET",
+      "/api/keywords?pending=1&limit=200",
+      { token: tokenFor(userId) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every((k) => k.approved === false)).toBe(true);
+  });
+
+  it("❗ 키워드 승인은 admin 전용이다 (LLM 초안이 그대로 검색에 나가면 안 된다)", async () => {
+    const [row] = await db.owner<Array<{ id: string }>>`
+      select id from company_keywords where company_id = ${candidate.companyId}
+    `;
+    const denied = await call("POST", `/api/keywords/${row!.id}/approve`, {
+      token: tokenFor(userId),
+      body: { approved: true },
+    });
+    expect(denied.status).toBe(403);
+
+    const ok = await call<{ data: { approved: boolean } }>(
+      "POST",
+      `/api/keywords/${row!.id}/approve`,
+      { token: tokenFor(adminId), body: { approved: true } },
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.approved).toBe(true);
+
+    const [after] = await db.owner<Array<{ approved: boolean }>>`
+      select approved from company_keywords where id = ${row!.id}
+    `;
+    expect(after!.approved).toBe(true);
+  });
+
+  it("approved 가 boolean 이 아니면 거절한다", async () => {
+    const [row] = await db.owner<Array<{ id: string }>>`select id from company_keywords limit 1`;
+    const res = await call("POST", `/api/keywords/${row!.id}/approve`, {
+      token: tokenFor(adminId),
+      body: { approved: "네" },
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("비용", () => {
+  it("❗ 검수자는 볼 수 없다 (조용히 0원으로 보이면 안 된다)", async () => {
+    expect((await call("GET", "/api/costs", { token: tokenFor(userId) })).status).toBe(403);
+  });
+
+  it("일별·제공자별 합계와 상한을 준다", async () => {
+    await db.owner`
+      insert into cost_ledger (entry_key, provider, unit, qty, krw)
+      values ('test:cost:1', 'naver_search', 'call', 100, 120.5)
+      on conflict (entry_key) do nothing
+    `;
+    const res = await call<{
+      data: {
+        daily: Array<{ day: string; krw: number }>;
+        providers: Array<{ provider: string; krw: number }>;
+        caps: { daily_cap_krw: number | null };
+        todayKrw: number;
+      };
+    }>("GET", "/api/costs", { token: tokenFor(adminId) });
+    expect(res.status).toBe(200);
+    expect(res.body.data.providers.some((p) => p.provider === "naver_search")).toBe(true);
+    expect(res.body.data.caps.daily_cap_krw).toBeGreaterThan(0);
+    expect(res.body.data.todayKrw).toBeGreaterThan(0);
+  });
+});
+
+describe("❗ 개인정보 요청 (F-08)", () => {
+  it("접수는 admin 이 아니어도 할 수 있다 (법정 권리 행사를 막으면 안 된다)", async () => {
+    const res = await call<{ data: { request_id: string } }>("POST", "/api/privacy/requests", {
+      token: tokenFor(userId),
+      body: { kind: "delete", subject: "owner@clinic.example.kr", note: "홈페이지 문의" },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.owner<Array<{ status: string; due_at: string; received_at: string }>>`
+      select status, due_at, received_at from privacy_requests where id = ${res.body.data.request_id}
+    `;
+    expect(row!.status).toBe("received");
+    // 기한은 접수 시점에 못 박는다 — 개인정보보호법 시행령상 10일.
+    const days =
+      (new Date(row!.due_at).getTime() - new Date(row!.received_at).getTime()) / 86_400_000;
+    expect(Math.round(days)).toBe(10);
+  });
+
+  it("우리가 가진 이메일이면 업체가 자동으로 연결된다", async () => {
+    const candidate = await createCandidate(db, { name: "요청 대상 치과" });
+    // ❗ 전용 사용자로 입력한다. 수동 입력은 분당 3건 제한이 있어서, 앞 테스트들이 쓴
+    //    사용자를 재사용하면 429 가 나고 이 테스트는 엉뚱한 이유로 실패한다.
+    const entrant = await createUser(db, "privacy-entrant@leadops.test", "user");
+    const detail = await call<{ data: { nonce: string } }>(
+      "GET",
+      `/api/review/${candidate.reviewItemId}`,
+      { token: tokenFor(entrant) },
+    );
+    const entered = await call("POST", `/api/review/${candidate.reviewItemId}/contact-email`, {
+      token: tokenFor(entrant),
+      body: {
+        address: "privacy-link@clinic.example.kr",
+        emailType: "inquiry",
+        contactPageId: candidate.contactPageId,
+        nonce: detail.body.data.nonce,
+      },
+    });
+    expect(entered.status).toBe(200);
+
+    const res = await call<{ data: { company_id: string | null } }>("POST", "/api/privacy/requests", {
+      token: tokenFor(userId),
+      body: { kind: "access", subject: "privacy-link@clinic.example.kr" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.company_id).toBe(candidate.companyId);
+  });
+
+  it("알 수 없는 종류·빈 식별자는 거절한다", async () => {
+    const bad = await call("POST", "/api/privacy/requests", {
+      token: tokenFor(userId),
+      body: { kind: "복사", subject: "a@b.kr" },
+    });
+    expect(bad.status).toBe(400);
+
+    const empty = await call("POST", "/api/privacy/requests", {
+      token: tokenFor(userId),
+      body: { kind: "delete", subject: "   " },
+    });
+    expect(empty.status).toBe(400);
+  });
+
+  it("❗ 목록 조회는 admin 전용이다 (요청자 식별자가 곧 개인정보다)", async () => {
+    const denied = await call("GET", "/api/privacy/requests", { token: tokenFor(userId) });
+    expect(denied.status).toBe(403);
+
+    const ok = await call<{ data: Array<{ kind: string; overdue: boolean }> }>(
+      "GET",
+      "/api/privacy/requests?open=1",
+      { token: tokenFor(adminId) },
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.length).toBeGreaterThan(0);
+    expect(ok.body.data.every((r) => r.overdue === false)).toBe(true);
+  });
+});
+
+describe("경쟁사 수동 교체", () => {
+  it("❗ admin 전용이고, 교체하면 재분석 대상이 된다", async () => {
+    const target = await createCandidate(db, { name: "교체 대상 치과" });
+    const rival = await createCandidate(db, { name: "새 경쟁사 치과" });
+
+    const denied = await call("POST", `/api/review/${target.reviewItemId}/competitors`, {
+      token: tokenFor(userId),
+      body: { rank: 1, competitorCompanyId: rival.companyId },
+    });
+    expect(denied.status).toBe(403);
+
+    const res = await call<{ data: { competitor_id: string; needs_reanalysis: boolean } }>(
+      "POST",
+      `/api/review/${target.reviewItemId}/competitors`,
+      { token: tokenFor(adminId), body: { rank: 1, competitorCompanyId: rival.companyId } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.needs_reanalysis).toBe(true);
+
+    const [row] = await db.owner<
+      Array<{ is_valid: boolean; selection_method: string; metrics: number }>
+    >`
+      select c.is_valid, c.selection_method,
+             (select count(*)::int from competitor_metrics m where m.competitor_id = c.id) as metrics
+      from competitors c where c.id = ${res.body.data.competitor_id}
+    `;
+    expect(row!.selection_method).toBe("manual");
+    // ❗ 지표를 다시 계산하기 전에는 유효로 볼 수 없다 — 이전 경쟁사 지표가 새 경쟁사 것으로 읽힌다.
+    expect(row!.is_valid).toBe(false);
+    expect(row!.metrics).toBe(0);
+  });
+
+  it("자기 자신을 경쟁사로 넣을 수 없다", async () => {
+    const target = await createCandidate(db, { name: "자기참조 치과" });
+    const res = await call("POST", `/api/review/${target.reviewItemId}/competitors`, {
+      token: tokenFor(adminId),
+      body: { rank: 1, competitorCompanyId: target.companyId },
+    });
+    expect(res.status).toBe(400);
+  });
+});

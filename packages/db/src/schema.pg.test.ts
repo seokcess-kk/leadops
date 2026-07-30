@@ -33,6 +33,7 @@ describe("마이그레이션", () => {
       "0008_channel_saturation.sql",
       "0009_collection_scope.sql",
       "0010_verify_contact_email.sql",
+      "0011_admin_rpcs.sql",
     ]);
   });
 

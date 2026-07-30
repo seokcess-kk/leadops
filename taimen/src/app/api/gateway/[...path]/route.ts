@@ -23,8 +23,22 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: readonly string[] }> = [
   { method: "POST", pattern: ["api", "review", ":id", "contact-email"] },
   { method: "POST", pattern: ["api", "review", ":id", "decision"] },
   { method: "POST", pattern: ["api", "review", "bulk-decision"] },
+  { method: "POST", pattern: ["api", "review", ":id", "competitors"] },
   { method: "GET", pattern: ["api", "leads"] },
   { method: "GET", pattern: ["api", "leads", "export"] },
+  { method: "GET", pattern: ["api", "runs"] },
+  { method: "GET", pattern: ["api", "runs", ":id"] },
+  { method: "POST", pattern: ["api", "runs"] },
+  { method: "POST", pattern: ["api", "runs", ":id", "retry"] },
+  { method: "POST", pattern: ["api", "runs", ":id", "cancel"] },
+  { method: "GET", pattern: ["api", "settings"] },
+  { method: "PUT", pattern: ["api", "settings", ":key"] },
+  { method: "GET", pattern: ["api", "costs"] },
+  { method: "GET", pattern: ["api", "industries"] },
+  { method: "GET", pattern: ["api", "keywords"] },
+  { method: "POST", pattern: ["api", "keywords", ":id", "approve"] },
+  { method: "GET", pattern: ["api", "privacy", "requests"] },
+  { method: "POST", pattern: ["api", "privacy", "requests"] },
 ];
 
 function allowed(method: string, segments: readonly string[]): boolean {
@@ -91,5 +105,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ path: string[] 
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
+  return forward(req, (await ctx.params).path);
+}
+
+export async function PUT(req: Request, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
   return forward(req, (await ctx.params).path);
 }

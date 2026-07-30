@@ -54,6 +54,11 @@ const DB_ERROR_MAP: ReadonlyArray<{ match: RegExp; status: number; code: string;
   { match: /page_company_mismatch/, status: 400, code: "page_company_mismatch", message: "그 연락처 페이지는 이 업체의 것이 아닙니다" },
   { match: /invalid_syntax/, status: 400, code: "invalid_syntax", message: "이메일 형식이 올바르지 않습니다" },
   { match: /already_decided|not_pending/, status: 409, code: "already_decided", message: "이미 처리된 항목입니다" },
+  { match: /run_not_cancellable/, status: 409, code: "run_not_cancellable", message: "이미 끝난 실행은 취소할 수 없습니다" },
+  { match: /run_cancelled/, status: 409, code: "run_cancelled", message: "취소된 실행은 재시도할 수 없습니다" },
+  { match: /no_attempt|nothing_to_retry/, status: 409, code: "nothing_to_retry", message: "재시도할 작업이 없습니다" },
+  { match: /self_is_not_competitor/, status: 400, code: "self_is_not_competitor", message: "자기 자신을 경쟁사로 지정할 수 없습니다" },
+  { match: /invalid_kind|subject_required/, status: 400, code: "bad_request", message: "요청 내용이 올바르지 않습니다" },
   { match: /no_data_found|query returned no rows/i, status: 404, code: "not_found", message: "찾을 수 없습니다" },
   { match: /permission denied/i, status: 403, code: "forbidden", message: "권한이 없습니다" },
   { match: /(^|[^a-z])forbidden([^a-z]|$)/, status: 403, code: "forbidden", message: "권한이 없습니다 (admin 필요)" },
@@ -68,11 +73,6 @@ export function toApiError(err: unknown): ApiError {
     if (entry.match.test(message)) {
       return new ApiError(entry.status, entry.code, entry.message, { db: message.slice(0, 200) });
     }
-  }
-  if (process.env["API_DEBUG_ERRORS"]) {
-    console.error("UNMAPPED:", JSON.stringify(message), "len", message.length, "entries", DB_ERROR_MAP.length,
-      "msgCP", [...message].map((c) => c.codePointAt(0)).join(" "),
-      "reCP", [...(DB_ERROR_MAP[12]?.match.source ?? "")].map((c) => c.codePointAt(0)).join(" "));
   }
   return new ApiError(500, "internal_error", "처리 중 오류가 발생했습니다");
 }
@@ -113,6 +113,7 @@ export class Router {
 
   get = (p: string, h: Handler): this => this.add("GET", p, h);
   post = (p: string, h: Handler): this => this.add("POST", p, h);
+  put = (p: string, h: Handler): this => this.add("PUT", p, h);
 
   match(method: string, pathname: string): { handler: Handler; params: Record<string, string> } | undefined {
     const parts = pathname.replace(/\/+$/, "").split("/");

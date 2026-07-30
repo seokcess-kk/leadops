@@ -1,5 +1,5 @@
 import { verifyEmailAddress, type MxResolver } from "@leadops/http";
-import { badRequest, pageLimit, Router, type Ctx } from "../http";
+import { badRequest, forbidden, pageLimit, Router, type Ctx } from "../http";
 
 type Row = Record<string, unknown>;
 import type { Session } from "../session";
@@ -284,6 +284,39 @@ export function reviewRoutes(deps: ReviewDeps): Router {
       }
     }
     return { data: outcomes, meta: { requested: ids.length, rejected: outcomes.filter((o) => o.ok).length } };
+  });
+
+  /**
+   * 경쟁사 수동 교체.
+   *
+   * 유효 경쟁사가 부족하면 약점 등급이 `unavailable` 이 되고 게이트에서 탈락한다(A.6).
+   * 초기 실행에서는 이 경우가 흔해서, admin 이 비교 대상을 직접 지정할 길이 필요하다.
+   *
+   * ❗ 교체된 경쟁사는 `is_valid = false` 로 들어가고 지표는 삭제된다. 재분석 없이 점수에
+   *    반영되면 이전 경쟁사의 지표가 새 경쟁사의 것으로 읽힌다.
+   */
+  router.post("/api/review/:id/competitors", async (ctx: Ctx) => {
+    if (!(await deps.session.isAdmin(ctx.userId))) throw forbidden("admin 권한이 필요합니다");
+    const body = await ctx.body<{ rank?: unknown; competitorCompanyId?: unknown }>();
+    const rank = body.rank;
+    if (typeof rank !== "number" || !Number.isInteger(rank) || rank < 1 || rank > 10) {
+      throw badRequest("rank 는 1~10 사이의 정수여야 합니다");
+    }
+    const competitorId = str(body.competitorCompanyId, "competitorCompanyId");
+
+    return deps.session.asUser(ctx.userId, async (tx) => {
+      const [item] = await tx<Array<{ company_id: string; attempt_id: string }>>`
+        select company_id, attempt_id from review_items where id = ${ctx.params["id"]!}
+      `;
+      if (!item) throw badRequest("검수 항목을 찾을 수 없습니다");
+
+      const rows = await tx<Array<{ replace_competitor: unknown }>>`
+        select public.replace_competitor(
+          ${item.attempt_id}, ${item.company_id}, ${rank}, ${competitorId}
+        )
+      `;
+      return { data: rows[0]!.replace_competitor };
+    });
   });
 
   return router;

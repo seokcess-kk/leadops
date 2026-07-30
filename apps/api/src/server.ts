@@ -4,8 +4,12 @@ import type { MxResolver } from "@leadops/http";
 import type { Sql } from "postgres";
 import { makeCtx, Router, sendJson, toApiError, type Handler } from "./http";
 import { bearerToken, verifyJwt } from "./jwt";
+import { industryRoutes } from "./routes/industries";
 import { leadRoutes } from "./routes/leads";
+import { privacyRoutes } from "./routes/privacy";
 import { reviewRoutes } from "./routes/review";
+import { runRoutes } from "./routes/runs";
+import { settingsRoutes } from "./routes/settings";
 import { Session } from "./session";
 
 /**
@@ -39,6 +43,10 @@ export function createApi(options: ApiOptions): Server {
   const routers: Router[] = [
     reviewRoutes({ session, resolver: options.resolver }),
     leadRoutes({ session }),
+    runRoutes({ session }),
+    settingsRoutes({ session }),
+    industryRoutes({ session }),
+    privacyRoutes({ session }),
   ];
 
   const resolveRoute = (method: string, pathname: string): { handler: Handler; params: Record<string, string> } | undefined => {
