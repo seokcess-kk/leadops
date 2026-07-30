@@ -14,6 +14,8 @@
     "test:watch": "vitest",
     "test:db": "vitest run --config vitest.pg.config.ts",
     "verify": "pnpm typecheck && pnpm test && pnpm test:db",
+    "e2e": "pnpm --filter @leadops/e2e test",
+    "e2e:install": "pnpm --filter @leadops/e2e install-browser",
     "db:up": "docker run -d --name leadops-pg -e POSTGRES_PASSWORD=leadops -e POSTGRES_DB=leadops -p 55432:5432 postgres:17-alpine",
     "db:down": "docker rm -f leadops-pg",
     "db:psql": "docker exec -it leadops-pg psql -U postgres",

@@ -52,6 +52,17 @@ export async function startRun(sql: Sql, options: StartRunOptions): Promise<Star
     throw configError("업종을 하나 이상 지정해야 합니다");
   }
 
+  // ❗ 용량 게이트를 **실행을 만들기 전에** 통과한다 (설계서 4.2 · 90% 도달 시 차단).
+  //    꽉 찬 뒤에 멈추면 그 순간의 쓰기가 실패하면서 중간 상태가 남는다. 여기서 던지는
+  //    `capacity_exceeded` 는 조용히 삼키지 않는다 — 실행이 안 만들어졌다는 사실이 알려져야 한다.
+  const [capacity] = await sql<Array<{ assert_capacity_for_run: Record<string, unknown> }>>`
+    select public.assert_capacity_for_run()
+  `;
+  const level = capacity?.assert_capacity_for_run?.["level"];
+  if (level === "warn" || level === "cleanup") {
+    options.logger.warn("capacity.pressure", capacity?.assert_capacity_for_run ?? {});
+  }
+
   const runDate = options.runDate ?? new Date().toISOString().slice(0, 10);
 
   const started = await sql.begin(async (tx) => {

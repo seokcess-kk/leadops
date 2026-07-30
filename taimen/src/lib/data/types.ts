@@ -218,8 +218,54 @@ export interface Lead {
   exportStatus?: string;
 }
 
-/** 파이프라인 스테이지 13종 (설계서 §5.3 DAG). */
+/** 파이프라인 스테이지 상태. `stage_status` 열거형과 같다 (마이그레이션 0001). */
 export type StageStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "skipped";
+
+/**
+ * 파이프라인 스테이지 12종의 한글 라벨 (설계서 §5.3 DAG).
+ *
+ * ❗ API 는 `run_stages.stage` 를 열거형 값 그대로 준다 — 라벨을 주지 않는다. 여기가 유일한
+ *    번역 지점이고, 키는 `apps/api/src/routes/runs.ts` 의 `STAGES` 와 같아야 한다.
+ */
+export const STAGE_LABEL: Record<string, string> = {
+  collect: "수집",
+  normalize: "정규화 · 중복 제거",
+  exclude_basic: "기본 제외",
+  homepage_detect: "공식 홈페이지 판정",
+  contact_pages: "연락처 페이지 탐지",
+  channel_analyze: "채널 활성도",
+  search_analyze: "검색 회수 점유 (ORS)",
+  competitor_select: "경쟁사 선정",
+  competitor_analyze: "경쟁사 지표",
+  score: "3축 점수 · 게이트",
+  recommend: "추천 서비스",
+  shortlist: "검수 후보 확정",
+};
+
+/** 서버가 모르는 스테이지를 보내와도 화면이 비지 않게 한다. */
+export const stageLabel = (stage: string): string => STAGE_LABEL[stage] ?? stage;
+
+/**
+ * DAG 순서. `STAGE_LABEL` 의 선언 순서가 곧 파이프라인 순서다.
+ *
+ * ❗ API 는 `order by s.stage` 로 **알파벳 순**을 준다 (`routes/runs.ts`). 그대로 그리면
+ *    `channel_analyze` 가 `collect` 보다 앞에 와서 "채널 분석이 먼저 돌았다" 로 읽힌다.
+ *    순서를 아는 곳은 여기뿐이므로 화면에서 정렬한다.
+ */
+const STAGE_ORDER: readonly string[] = Object.keys(STAGE_LABEL);
+
+/** 모르는 스테이지는 뒤로 보낸다 — 빠뜨리지 않고, 알려진 순서를 흐트러뜨리지도 않는다. */
+export const stageRank = (stage: string): number => {
+  const index = STAGE_ORDER.indexOf(stage);
+  return index === -1 ? STAGE_ORDER.length : index;
+};
+
+/** 서버 문자열을 StageStatus 로 좁힌다. 열거형이 늘어나면 원문을 그대로 두는 대신 pending 으로 본다. */
+const STAGE_STATUSES: readonly StageStatus[] = [
+  "pending", "running", "succeeded", "partial", "failed", "skipped",
+];
+export const asStageStatus = (value: string): StageStatus =>
+  (STAGE_STATUSES as readonly string[]).includes(value) ? (value as StageStatus) : "pending";
 
 export interface RunStage {
   name: string;
@@ -231,7 +277,23 @@ export interface RunStage {
   finishedAt?: string;
 }
 
-export type RunStatus = "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled";
+/** `run_status` 열거형과 같다 (마이그레이션 0001). `paused` 를 빠뜨리면 화면이 빈 태그를 그린다. */
+export type RunStatus =
+  | "queued" | "running" | "paused" | "succeeded" | "partial" | "failed" | "cancelled";
+
+/** 실행 상태를 스테이지 태그 어휘로 옮긴다. StageTag 하나로 두 상태를 다 그리기 위한 것이다. */
+export const RUN_STATUS_AS_STAGE: Record<RunStatus, StageStatus> = {
+  queued: "pending",
+  running: "running",
+  paused: "pending",
+  succeeded: "succeeded",
+  partial: "partial",
+  failed: "failed",
+  cancelled: "skipped",
+};
+
+export const asRunStatus = (value: string): RunStatus =>
+  value in RUN_STATUS_AS_STAGE ? (value as RunStatus) : "queued";
 
 export interface FailedJob {
   id: string;
@@ -269,15 +331,26 @@ export interface IndustryConfig {
   keywords: KeywordTemplate[];
 }
 
-/** 오늘의 퍼널 카운터 (MetricStrip). */
+/**
+ * 오늘의 퍼널 카운터 (MetricStrip).
+ *
+ * ❗ `null` 은 **모른다**는 뜻이고 0 과 다르다 (설계서 A.6). 화면은 `null` 을 `—` 로 그린다.
+ *    0 으로 채우면 "수집한 것이 없다" 로 읽혀 운영자가 실행이 실패한 것으로 오해한다.
+ *
+ *  - `rawCandidates`·`analyzed` — **어떤 엔드포인트도 주지 않는다.** `runs.counts` 는 선언만
+ *    되어 있고 파이프라인이 쓰지 않아 항상 `{}` 다. 백엔드가 채우기 전까지 항상 `null` 이다.
+ *  - `costKrw`·`naverQuotaPct` — `/api/costs` 가 admin 전용이다. 검수자 권한이면 `null`.
+ *  - `rejected` — 목록 응답에 `decided_at` 이 없어 **오늘분을 가려낼 수 없다.** 누적값을
+ *    오늘 값처럼 보여 주지 않으려고 `null` 로 둔다.
+ */
 export interface TodayMetrics {
-  rawCandidates: number;
-  analyzed: number;
+  rawCandidates: number | null;
+  analyzed: number | null;
   reviewQueue: number;
   approved: number;
-  rejected: number;
+  rejected: number | null;
   finalLeads: number;
-  approvalCap: number; // targets.final_max
-  costKrw: number;
-  naverQuotaPct: number;
+  approvalCap: number | null; // targets.final_max
+  costKrw: number | null;
+  naverQuotaPct: number | null;
 }

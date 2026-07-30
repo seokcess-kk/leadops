@@ -8,8 +8,7 @@ import { LeadTable } from "@/components/today/LeadTable";
 import { MetricStrip } from "@/components/today/MetricStrip";
 import { RejectDialog } from "@/components/today/RejectDialog";
 import { Notice } from "@/components/ui/Notice";
-import { runs, TODAY } from "@/lib/data/fixtures";
-import { useReview } from "@/lib/data/store";
+import { seoulToday, useReview } from "@/lib/data/store";
 import { INDUSTRY_LABEL } from "@/lib/data/types";
 
 /**
@@ -93,7 +92,9 @@ export default function TodayPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [dispatch, actions, visibleIds, visible, cursor, cursorItem, state.openId, reject, openReject]);
 
-  const latestRun = runs[0];
+  // 실행 ID 는 uuid 라 통째로 보여 줄 수 없다. 앞 8자만 쓴다 (`/runs` 목록과 같은 규칙).
+  const runLabel = state.ops.latestRunId ? state.ops.latestRunId.slice(0, 8).toUpperCase() : "—";
+  const quotaPct = metrics.naverQuotaPct;
 
   return (
     <>
@@ -102,16 +103,18 @@ export default function TodayPage() {
         title="오늘의 검수"
         right={
           <>
-            {/* ⚠️ 실행 ID·비용·쿼터는 /api/runs·/api/costs 가 없어 아직 알 수 없다.
-                fixture 값을 실데이터처럼 보여 주지 않는다. */}
-            <HeaderStat label="Run" value={source === "fixture" ? latestRun.id.toUpperCase() : "—"} />
-            <HeaderStat label="Cost" value={source === "fixture" ? `₩${metrics.costKrw.toLocaleString("ko-KR")}` : "—"} />
+            <HeaderStat label="Run" value={runLabel} />
+            {/* ❗ 비용·쿼터는 admin 전용이다. 권한이 없으면 "₩0" 이 아니라 `—` 다. */}
+            <HeaderStat
+              label="Cost"
+              value={metrics.costKrw === null ? "—" : `₩${metrics.costKrw.toLocaleString("ko-KR")}`}
+            />
             <HeaderStat
               label="Quota"
-              value={source === "fixture" ? `${metrics.naverQuotaPct}%` : "—"}
-              accent={source === "fixture" && metrics.naverQuotaPct > 80}
+              value={quotaPct === null ? "—" : `${quotaPct}%`}
+              accent={quotaPct !== null && quotaPct > 80}
             />
-            <HeaderStat label="Date" value={TODAY} />
+            <HeaderStat label="Date" value={seoulToday()} />
           </>
         }
       />

@@ -3,8 +3,10 @@
 마케팅 에이전시 내부용 리드 발굴 도구. 검색 수요는 있으나 검색 결과물·콘텐츠 점유가
 경쟁사보다 부족한 업체를 찾아 영업 가치가 높은 리드만 선별한다.
 
-> **현재 상태: Phase 6 진행 (검수 API·MX·UI 연동 완료 / E2E·나머지 엔드포인트 미완)**
-> 설계서 `docs/00-plan.md` v3 기준. 검수 → 이메일 → 승인 → 리드가 UI 에서 실제로 동작한다.
+> **현재 상태: Phase 7 대부분 완료 (스케줄러·용량·개인정보 집행·복구 리허설)**
+> 설계서 `docs/00-plan.md` v3 기준. Phase 6 은 닫혔다(E2E 13건). Phase 7 에서 남은 것은
+> **파티셔닝**과 **평일 06:00 3영업일 연속 성공**(달력이 필요하다)이다. Phase 2~5 의 완료
+> 기준(골드셋 M2·M3·M6)은 여전히 미측정이다. 운영 절차는 [`docs/07-runbook.md`](docs/07-runbook.md).
 
 ## 문서
 
@@ -17,6 +19,7 @@
 | [`docs/04-code-review-round1.md`](docs/04-code-review-round1.md) | codex 코드 리뷰 판정 — 기반 계층 (13건) |
 | [`docs/05-code-review-round2.md`](docs/05-code-review-round2.md) | codex 코드 리뷰 판정 — DB 계층 (11건) |
 | [`docs/06-adapter-verification.md`](docs/06-adapter-verification.md) | **어댑터 실 API 검증 절차** — 키 발급부터 플래그 전환까지 |
+| [`docs/07-runbook.md`](docs/07-runbook.md) | **운영 런북** — 배포·스케줄러·용량·개인정보 처리·백업/복구 |
 | `docs/critique/` | codex 원본 비평 보존 |
 
 ## 빠른 시작
@@ -26,7 +29,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 633 단위 + 214 DB 테스트
+pnpm verify               # typecheck + 633 단위 + 242 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -57,7 +60,7 @@ packages/pipeline   정규화 · 중복 제거 · 제외 규칙 · HTML 스캐�
 apps/api            검수 API (JWT 검증 · RLS 세션 · MX 게이트 · 에러 봉투)
 apps/worker         잡 루프 (fencing · heartbeat · 안전 종료)
 apps/spike          Phase 0 스파이크 CLI (DB 없이 동작)
-taimen/             검수 콘솔 UI (Next.js 16 · 아직 fixture 모드)
+taimen/             검수 콘솔 UI (Next.js 16 · 실데이터 · 독립 pnpm 워크스페이스)
 ```
 
 ### DB 계층 (packages/db)
@@ -75,6 +78,30 @@ taimen/             검수 콘솔 UI (Next.js 16 · 아직 fixture 모드)
 | `0008_channel_saturation` | 피드 포화 표시 · ORS 분모 0 허용 |
 | `0009_collection_scope` | 수집 범위 설정 (`hira_scope`) |
 | `0010_verify_contact_email` | MX 검증 결과 기록 RPC (서버 전용) |
+| `0011_admin_rpcs` | 실행 취소·재시도 · 키워드 승인 · 경쟁사 교체 · 개인정보 접수 |
+| `0012_ops_privacy_capacity` | 개인정보 **집행** · 용량 게이트 · 스케줄 판정 |
+| `0013_fix_setting_paths` | **결함 수정** — `settings` 단일 행에 중첩 jsonb 경로를 쓴 곳 (아래) |
+
+`packages/db/migrations/deploy/` 는 **체인에 없다.** `pg_cron_schedule.sql` 은 pg_cron·pg_net 이
+있는 배포 대상에만 적용한다 (로컬 컨테이너에 확장이 없어 검증할 수 없다).
+
+### ⚠️ 0013 이 고친 결함 — 설정이 조용히 무시되고 있었다
+
+`settings` 는 키 하나에 그 키의 객체만 담는다(`key='review'`, `value={"nonce_ttl_minutes":30,…}`).
+그런데 세 함수가 `value #>> '{review,nonce_ttl_minutes}'` 처럼 **키를 한 번 더** 타고 들어갔다.
+그 경로는 항상 NULL 이고 전부 `coalesce(…, 기본값)` 으로 감싸져 있어서 **조용히 기본값으로
+동작**했다 — 값을 바꿔도 아무 일이 일어나지 않는다.
+
+| 설정 | 영향 |
+|---|---|
+| `review.manual_email_per_minute` | 이메일 수동 입력 **rate limit 을 조일 수 없었다** (보안 통제) |
+| `review.nonce_ttl_minutes` | 검수 화면 nonce 유효 시간을 바꿀 수 없었다 |
+| `export.max_per_lead` | 리드당 export 횟수 상한을 바꿀 수 없었다 (항상 3) |
+
+시드 값이 코드 기본값과 같아서(3·30·3) 기존 테스트도 통과했다. `ops.pg.test.ts` 는
+"저장된다" 가 아니라 **"바꾼 값이 실제로 동작을 바꾼다"** 를 검증한다.
+`runs.settings_snapshot` 을 읽는 곳(`decide_review_item`)은 정상이었다 — 스냅샷은
+`snapshot_settings()` 가 키로 묶은 객체라 중첩 경로가 맞다.
 
 **최초 admin 부트스트랩** (배포 runbook): DB 소유자가 직접 승격한다.
 ```sql
@@ -380,7 +407,24 @@ GET  /api/review/:id          상세 + 1회용 nonce 발급
 POST /api/review/:id/contact-email   연락처 수동 입력 → 문법·DNS·MX
 POST /api/review/:id/decision        승인·제외 (승인은 emailId 필수)
 POST /api/review/bulk-decision       일괄 **제외만**
+POST /api/review/:id/competitors     경쟁사 수동 지정
 GET  /api/leads · /api/leads/export  목록 · export(admin 전용)
+
+GET  /api/runs · /api/runs/:id       실행 이력 · 상세(스테이지·실패 잡·비용)
+POST /api/runs                       수동 실행 (admin · dryRun 지원)
+POST /api/runs/:id/retry · /cancel   스테이지부터 재실행 · 취소 (admin)
+GET  /api/settings                   설정 9키 + 파서 통과 적용값(effective)
+PUT  /api/settings/:key              키 통째 덮어쓰기 (admin · 화이트리스트)
+GET  /api/costs                      일별·제공자별 비용 · 상한 (admin 전용)
+GET  /api/industries                 업종별 업체·공식 홈페이지·키워드·리드·쿼터
+GET  /api/keywords · POST /:id/approve   업체 키워드 · 승인 (admin)
+GET  /api/privacy/requests · POST    개인정보 요청 접수(user)·목록(admin)
+POST /api/privacy/requests/:id/advance         상태 전이 (admin · 보류·거절은 사유 필수)
+POST /api/privacy/requests/:id/access-report   열람 보고서 (admin · 조회가 감사 기록된다)
+POST /api/privacy/requests/:id/execute         삭제·처리정지 **집행** (admin · 되돌릴 수 없다)
+GET  /api/capacity                   DB 용량·테이블별 크기 (admin)
+
+POST /internal/run                   pg_cron 트리거 (HMAC 서명 · JWT 없음)
 ```
 
 `pnpm api` 로 띄운다. `API_DATABASE_URL` · `SUPABASE_JWT_SECRET` 이 필요하다.
@@ -399,13 +443,34 @@ GET  /api/leads · /api/leads/export  목록 · export(admin 전용)
 
 프록시는 경로를 **허용 목록**으로 좁힌다. 열어 두면 이 핸들러가 API 전체에 대한 통로가 된다.
 
+`taimen` 은 **상위 워크스페이스에 속하지 않는다** (`taimen/pnpm-workspace.yaml` 이 경계다).
+루트에서 `pnpm install` 해도 UI 의존성은 깔리지 않으므로 `taimen/` 안에서 따로 설치한다.
+
 ```bash
-# 검수 API
+# 0) 로컬 검증용 DB
+pnpm db:up
+DATABASE_URL=postgres://postgres:leadops@127.0.0.1:55432/leadops pnpm db:migrate --bootstrap
+
+# 1) 검수자 계정 — auth.users 에 넣으면 트리거가 profiles 를 만든다
+#    insert into auth.users (id, email) values ('<uuid>', '<이메일>');
+#    update public.profiles set role = 'admin' where id = '<uuid>';   -- 비용·설정·실행은 admin 전용
+
+# 2) 워커 (leadops_worker 역할로 접속한다 — 로컬에서는 password 를 직접 부여)
+#    alter role leadops_worker with login password '<pw>';
+WORKER_DATABASE_URL=postgres://leadops_worker:<pw>@127.0.0.1:55432/leadops \
+DATABASE_URL=... FEATURE_SOURCE=mock pnpm worker run --industry=derm,dental
+
+# 3) 검수 API
 API_DATABASE_URL=... SUPABASE_JWT_SECRET=... API_PORT=8792 pnpm api
 
-# UI (taimen/)
-LEADOPS_API_URL=http://127.0.0.1:8792 SUPABASE_JWT_SECRET=... LEADOPS_DEV_LOGIN=1 LEADOPS_DEV_USER_ID=<profiles.id> pnpm dev
+# 4) UI (taimen/ 안에서)
+pnpm install
+LEADOPS_API_URL=http://127.0.0.1:8792 SUPABASE_JWT_SECRET=... \
+LEADOPS_DEV_LOGIN=1 LEADOPS_DEV_USER_ID=<profiles.id> pnpm dev
 ```
+
+> `127.0.0.1:3000` 이 아니라 **`localhost`** 로 접속한다. Next 16 은 `127.0.0.1` 에서 온
+> HMR 요청을 cross-origin 으로 막아 핫리로드가 죽는다 (`allowedDevOrigins`).
 
 > ⚠️ **`LEADOPS_DEV_LOGIN` 은 인증이 아니라 인증의 자리표시자다.** Supabase Auth 프로젝트가
 > 없어서 서버가 직접 토큰을 만든다. `NODE_ENV=production` 이거나 플래그가 없으면
@@ -461,19 +526,96 @@ UUID 가 아니면 거절한다.
 낮게 기록한다 — 엄격하게 MX 만 요구하면 실제로 메일이 가는 도메인을 탈락시킨다.
 `.` 하나만 오는 null MX(RFC 7505)는 **거부**한다. 메일을 받지 않겠다는 선언이다.
 
+## E2E (Playwright · `apps/e2e`)
+
+```bash
+pnpm db:up
+pnpm e2e:install     # chromium 최초 1회
+pnpm e2e
+```
+
+13개 테스트가 설계서 10절 Phase 6 완료 기준을 덮는다.
+
+| 파일 | 검증 |
+|---|---|
+| `01-review.spec.ts` | 검수 목록 → 연락처 근거로 이메일 입력 → **실제 DNS·MX** → 승인 → 리드 → export(워터마크·감사 로그·`export_count`) |
+| `02-caps.spec.ts` | 일 승인 상한 `409 daily_cap_reached` · 업종 비율 `409 industry_quota_exceeded` · 상한이 화면 카운터에 그대로 |
+| `03-xss.spec.ts` | 업체명 XSS 페이로드가 텍스트로만 렌더링 (주입 노드 부재 · `dialog` 미발생) |
+| `04-keyboard.spec.ts` | `j/k` 이동 · `Space` 선택 · `Enter` 상세 · `e` 이메일 포커스 · `x`→숫자키→`Enter` 제외 · `Esc` 취소 · **일괄 승인 경로 부재** |
+
+이 하네스가 지키는 것:
+
+- **격리 데이터베이스.** `createTestDb` 로 실행마다 새로 만들고 teardown 이 DB 와 워커 역할까지
+  지운다 (역할은 클러스터 전역이라 남기면 쌓인다). 개발용 DB 를 건드리지 않는다.
+- **MX 는 흉내 내지 않는다.** 승인 게이트의 핵심이라 가짜 리졸버로 통과시키면 검증한 것이
+  아니다. 그래서 **네트워크가 필요하다** — 도메인은 `LEADOPS_E2E_MX_DOMAIN` 으로 바꿀 수 있다.
+- **`workers: 1` · `retries: 0`.** 검증 대상이 공유 상태(승인 카운터)이고 그 전이 자체가 규칙이다.
+  재시도는 실패를 감추고, 승인은 되돌릴 수 없다.
+- **후보는 fixture 로 만든다.** mock 파이프라인은 홈페이지가 실재하지 않아 게이트 통과 후보가
+  0 이다 (콜드 스타트). 통합 테스트와 같은 `@leadops/db` fixture 를 쓴다.
+
+> ⚠️ `taimen` 에서 개발용 `next dev` 가 돌고 있으면 E2E 가 실패한다. Next 는 **디렉터리 단위**로
+> 두 번째 dev 인스턴스를 거부한다(포트가 달라도). globalSetup 이 이 사유를 에러에 적어 준다.
+
+> ⚠️ 상한은 `runs.settings_snapshot` 에서 읽힌다 (`decide_review_item` · R2-19). live `settings`
+> 만 바꾸면 진행 중 실행의 판정은 바뀌지 않는다 — 의도된 설계이고, E2E 는 두 곳을 함께 바꾼다.
+
+**설계서 완료 기준과 다르게 한 것**: "동시 승인 51번째 거부" 를 상한 1 로 낮춰 검증한다.
+51행은 규칙이 아니라 숫자를 검증하는 것이고, 행 잠금 **직렬화**는 브라우저로는 검증할 수 없다 —
+그쪽은 `rpc.pg.test.ts` 가 동시 트랜잭션으로 본다. E2E 는 **화면까지 도달하는 경로**를 본다.
+
+## 운영 (Phase 7)
+
+절차는 [`docs/07-runbook.md`](docs/07-runbook.md). 코드가 강제하는 것만 여기 적는다.
+
+```bash
+pnpm worker schedule --dry-run   # 스케줄 판정만 (평일·중복·용량)
+pnpm worker schedule             # 조건 충족 시 cron 실행 생성
+pnpm worker capacity             # 용량·레벨 (block 이면 종료 코드 1)
+pnpm worker cleanup              # 용량 인식 정리
+pnpm worker reap                 # 만료 lease 회수
+scripts/restore-rehearsal.sh     # 백업·복구 리허설
+```
+
+**스케줄 판정은 cron 표현식에 없다.** pg_cron 은 "부를 시각" 만 알고, 평일(KST)·중복·용량은
+`should_start_scheduled_run()` 이 판정한다. 주말에 불려도 실패가 아니라 `skipped` 다.
+
+**용량 임계값** (설계서 4.2 — Free 500MB 로는 180일을 못 버틴다):
+
+| 레벨 | 임계 | 동작 |
+|---|---|---|
+| `warn` | ≥ 70% | 알람 |
+| `cleanup` | ≥ 85% | 정리 잡이 보존기간을 줄인다 (관련 문서 30→7일, 집계·관측 365→120일) |
+| `block` | ≥ 90% | **신규 실행 차단** — `startRun` 이 `capacity_exceeded` 로 실패한다 |
+
+**개인정보**: 접수만 되던 워크플로에 **집행**이 붙었다. `delete` 는 이메일을 파기하고
+`do_not_contact` 로 영구 차단한다 — 업체 행 자체는 지우지 않는다(지우면 재수집 대상이 되어
+다시 올라온다). `legal_hold` 는 삭제를 막고 사유를 남긴다. 기한은 접수 시점에 10일로 못 박힌다.
+
 ## 아직 없는 것
 
-Playwright E2E · 실행/설정/업종/비용/개인정보 엔드포인트 · Supabase Auth ·
-스케줄러(pg_cron) · 개인정보 워크플로 · Outreach(발송 상태) 모듈.
+Supabase Auth · Outreach(발송 상태) 모듈 · 관측 테이블 **파티셔닝**.
 
-UI 에서 아직 fixture 를 쓰는 화면: `/runs` · `/industries` · `/settings`
-(해당 엔드포인트가 없다). `/today` 와 `/leads` 는 실데이터다.
-검색 결과물 목록(`search_hits`)은 API 가 노출하지 않아 드로어의 SignalStream 이 비어 있다.
+UI 는 fixture 를 쓰지 않는다. `/today` · `/leads` · `/runs` · `/industries` · `/settings`
+가 전부 실데이터다 (fixture 는 `NEXT_PUBLIC_LEADOPS_DATA_SOURCE=fixture` 개발 모드에만 남아
+있고, 그 모드에서 `/runs`·`/industries`·`/settings` 는 검수 API 가 필요하다고 화면에 밝힌다).
 
-다음은 **taimen 을 API 에 연결하는 일**이다. UI 는 fixture 모드로 이미 있으므로
-`store.tsx` 의 전이 함수를 위 엔드포인트 호출로 바꾸면 된다. 이때 taimen 의
-**일 상한·업종 쿼터 미강제** 문제도 함께 해소된다 — 지금은 표시만 하지만, API 를 붙이면
-DB 가 `409` 를 돌려주므로 그 상태를 화면에 옮기기만 하면 된다.
+**API 가 줄 수 없어서 화면이 `—` 로 두는 것들** — 0 으로 채우지 않는다:
+
+| 값 | 왜 없는가 | 채우려면 |
+|---|---|---|
+| 퍼널 상단 (수집 후보 · 상세 분석) | `runs.counts` 가 선언만 되어 있고 **파이프라인이 쓰지 않는다** (항상 `{}`) | 오케스트레이터가 `counts` 를 갱신하거나, 실행별 집계 엔드포인트를 추가 |
+| 오늘 제외 건수 | `/api/review` 목록에 `decided_at` 이 없어 오늘분을 가려낼 수 없다 (누적값은 오늘 값이 아니다) | 목록 select 에 `ri.decided_at` 추가 |
+| 검색 결과물 목록 (드로어 SignalStream) | `search_hits` 를 API 가 노출하지 않는다 | 상세 응답에 추가 |
+| 사이드바 사용자·역할 | `/api/me` 가 없어 하드코딩이다 | 프로필 엔드포인트 추가 |
+| 실행별 네이버 쿼터 | `cost_ledger` 는 **일 단위 원장**이라 실행 단위 사용량이 없다 | 원장에 `run_id` 기준 집계를 노출하거나 실행별 쿼터를 기록 |
+
+비용·쿼터는 `/api/costs` 가 **admin 전용**이다. 검수자 권한으로 보면 `—` 이고, 이건 "0 원"과
+다르다 — 권한이 없어서 못 본 것이다.
+
+`/api/runs/:id` 는 스테이지를 **알파벳 순**(`order by s.stage`)으로 준다. DAG 순서를 아는 곳은
+UI 뿐이라 `types.ts` 의 `stageRank()` 가 다시 정렬한다 — 정렬하지 않으면 `channel_analyze` 가
+`collect` 보다 앞에 와서 실행 순서를 오독한다.
 
 다만 **Phase 2~5 의 완료 기준이 아직 미측정**이다 — 골드셋 120건이 없어
 M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) · M6(ORS 산출 가능률 ≥90%) ·
@@ -484,6 +626,8 @@ M2(공식 판별 정밀도 ≥0.90) · M3(연락처 후보 적중률 ≥50%) · 
 | 명령 | 설명 |
 |---|---|
 | `pnpm verify` | typecheck + 단위 + DB 테스트 |
+| `pnpm e2e` | Playwright E2E 13건 (Postgres·네트워크 필요) |
+| `pnpm e2e:install` | chromium 다운로드 (최초 1회) |
 | `pnpm typecheck` | TypeScript strict 검사 |
 | `pnpm test` | 단위·통합 테스트 (DB 불필요) |
 | `pnpm test:db` | DB 통합 테스트 (Postgres 필요) |

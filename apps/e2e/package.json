@@ -1,0 +1,16 @@
+{
+  "name": "@leadops/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "@leadops/db": "workspace:*",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}
