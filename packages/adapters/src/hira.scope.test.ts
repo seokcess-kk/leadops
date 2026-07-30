@@ -114,3 +114,35 @@ describe("로거를 쓰지 않는 경로에서도 동작한다", () => {
     expect(nullLogger).toBeDefined();
   });
 });
+
+describe("문서화된 코드표 (가이드 문서 전재)", () => {
+  it("❗ 우리가 쓰는 코드가 코드표의 이름과 일치한다", async () => {
+    const { HIRA_DGSBJT_NAMES, HIRA_CL_NAMES } = await import("./hira");
+    // 코드표는 공식 가이드 문서에서 옮긴 것이고, 우리가 고른 값이 그 표와 어긋나면 안 된다.
+    expect(HIRA_DGSBJT_NAMES[HIRA_CODES.dgsbjt_derm]).toBe("피부과");
+    expect(HIRA_DGSBJT_NAMES[HIRA_CODES.dgsbjt_plastic]).toBe("성형외과");
+    expect(HIRA_CL_NAMES[HIRA_CODES.cl_clinic]).toBe("의원");
+    expect(HIRA_CL_NAMES[HIRA_CODES.cl_dental_clinic]).toBe("치과의원");
+    expect(HIRA_CL_NAMES[HIRA_CODES.cl_dental_hospital]).toBe("치과병원");
+  });
+
+  it("이름 키워드가 코드표의 과목명과 같다", async () => {
+    const { HIRA_DGSBJT_NAMES } = await import("./hira");
+    // scope=name 과 scope=specialty 가 같은 과목을 가리켜야 한다.
+    expect(NAME_KEYWORD.derm).toBe(HIRA_DGSBJT_NAMES[HIRA_CODES.dgsbjt_derm]);
+    expect(NAME_KEYWORD.plastic).toBe(HIRA_DGSBJT_NAMES[HIRA_CODES.dgsbjt_plastic]);
+  });
+
+  it("❗ 치과·한방 코드가 표에 있다 (예전 탐색 범위 00~30 이 놓쳤던 구간)", async () => {
+    const { HIRA_DGSBJT_NAMES } = await import("./hira");
+    expect(HIRA_DGSBJT_NAMES["52"]).toBe("치과교정과");
+    expect(HIRA_DGSBJT_NAMES["61"]).toBe("통합치의학과");
+    expect(HIRA_DGSBJT_NAMES["85"]).toBe("침구과");
+  });
+
+  it("업종 확장 후보가 표에 있다", async () => {
+    const { HIRA_DGSBJT_NAMES, HIRA_CL_NAMES } = await import("./hira");
+    expect(HIRA_DGSBJT_NAMES["12"]).toBe("안과");
+    expect(HIRA_CL_NAMES["93"]).toBe("한의원");
+  });
+});

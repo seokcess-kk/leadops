@@ -26,7 +26,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 525 단위 + 162 DB 테스트
+pnpm verify               # typecheck + 529 단위 + 162 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -141,7 +141,7 @@ RPC: `decide_review_item` · `enter_contact_email` · `issue_review_nonce` ·
 |---|---|---|
 | `MockSourceAdapter` | 해당 없음 | — |
 | `HiraHospitalAdapter` | ✅ **검증됨** (2026-07-30) | 없음. 경로·필드·코드값 전부 실응답으로 확인, fixture 회귀 테스트 있음 |
-| `FtcFranchiseAdapter` | ❌ **미검증 · 진단 불가** | 후보 전부 500 인데 **음성 대조군도 같은 500** — 경로 추측이 무의미하다. 가이드 문서의 요청주소가 필요 |
+| `FtcFranchiseAdapter` | ❌ **미검증 · 진단 불가** | 후보 전부 500 인데 **음성 대조군도 같은 500** — 경로 추측이 무의미하다. **공정위 가맹정보** 데이터셋 가이드 문서의 요청주소가 필요 (HIRA 가이드에는 없음) |
 | `NaverSearchAdapter` | **미검증** | 자격증명 없음. 응답 fixture 는 개발자 문서 기반 추정. API HUB 이관 여부도 미확인(R2-04) |
 | RSS·Atom 피드 | **검증됨** | 키 불필요. RSS 2.0 · Atom · RDF 파싱 테스트 통과 |
 

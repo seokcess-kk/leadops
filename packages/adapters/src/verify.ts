@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { LeadOpsError, redactUrl, type Industry, type Logger } from "@leadops/core";
 import type { HttpClient } from "@leadops/http";
 import { encodeServiceKey } from "./dataGoKr";
-import { HIRA_CODES, NAME_KEYWORD, type HiraHospitalItem } from "./hira";
+import { HIRA_CODES, HIRA_DGSBJT_NAMES, NAME_KEYWORD, type HiraHospitalItem } from "./hira";
 import type { FtcBrandItem } from "./ftc";
 
 /**
@@ -440,15 +440,19 @@ export async function verifyHira(options: VerifyOptions): Promise<AdapterVerific
   /** 코드가 틀렸을 때 올바른 코드를 같은 방법으로 찾아 준다. */
   const discoverByName = async (keyword: string, withName: number): Promise<string> => {
     const found: Array<{ code: string; ratio: number; n: number }> = [];
-    for (let n = 0; n <= 30; n++) {
-      const code = String(n).padStart(2, "0");
+    // ❗ 후보는 **문서화된 코드표**다. 예전에는 00~30 을 훑었는데 그 범위는 치과(50~61)와
+    //    한방(80~85) 코드를 통째로 놓친다.
+    const candidates = Object.keys(HIRA_DGSBJT_NAMES);
+    for (const code of candidates) {
       const hit = await countOnly({ clCd: HIRA_CODES.cl_clinic, yadmNm: keyword, dgsbjtCd: code });
       if (hit !== undefined && hit / withName >= NAME_TO_CODE_MIN) found.push({ code, ratio: hit / withName, n: hit });
     }
-    if (found.length === 0) return "    탐색 결과: 00~30 중 기준을 넘는 코드가 없습니다.";
+    if (found.length === 0) {
+      return `    탐색 결과: 문서화된 코드 ${candidates.length}개 중 기준을 넘는 것이 없습니다.`;
+    }
     found.sort((a, b) => b.ratio - a.ratio);
     const lines = found.map(
-      (f) => `      dgsbjtCd=${f.code} → ${f.n}/${withName} (${(f.ratio * 100).toFixed(1)}%)`,
+      (f) => `      dgsbjtCd=${f.code}(${HIRA_DGSBJT_NAMES[f.code] ?? "?"}) → ${f.n}/${withName} (${(f.ratio * 100).toFixed(1)}%)`,
     );
     return ["    탐색 결과 (이름 → 코드, 전수 카운트):", ...lines].join("\n");
   };
