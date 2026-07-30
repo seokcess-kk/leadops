@@ -34,6 +34,8 @@ describe("마이그레이션", () => {
       "0009_collection_scope.sql",
       "0010_verify_contact_email.sql",
       "0011_admin_rpcs.sql",
+      "0012_ops_privacy_capacity.sql",
+      "0013_fix_setting_paths.sql",
     ]);
   });
 

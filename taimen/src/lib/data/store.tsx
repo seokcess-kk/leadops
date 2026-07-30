@@ -20,8 +20,8 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
-import { api, ApiError } from "./client";
-import { leads as leadFixture, reviewItems as reviewFixture, todayMetrics } from "./fixtures";
+import { api, ApiError, type ApiSettingRow } from "./client";
+import { leads as leadFixture, reviewItems as reviewFixture, runs as runFixture, todayMetrics } from "./fixtures";
 import { mapDetail, mapLead, mapListItem } from "./mapper";
 import type { EmailType, EnteredEmail, Lead, ReviewItem, TodayMetrics } from "./types";
 
@@ -36,9 +36,47 @@ export interface Notice {
   message: string;
 }
 
+/**
+ * 검수 목록 밖의 운영 컨텍스트 — 헤더의 실행 ID·비용·쿼터와 승인 상한.
+ *
+ * ❗ 전부 `null` 을 허용한다. 값이 없는 이유가 셋이나 되고(엔드포인트 부재 · 권한 없음 ·
+ *    아직 로딩 중), 어느 쪽이든 0 으로 보여 주면 안 된다.
+ */
+export interface OpsSnapshot {
+  latestRunId: string | null;
+  latestRunStatus: string | null;
+  /** `targets.final_max` — 일 승인 상한. */
+  approvalCap: number | null;
+  /** 오늘 누적 비용. admin 이 아니면 `null` 이고 `costsForbidden` 이 true 다. */
+  todayKrw: number | null;
+  naverQuotaPct: number | null;
+  /** 비용·쿼터를 볼 권한이 없다 (admin 전용). "0 원" 과 구분해야 한다. */
+  costsForbidden: boolean;
+}
+
+const emptyOps: OpsSnapshot = {
+  latestRunId: null,
+  latestRunStatus: null,
+  approvalCap: null,
+  todayKrw: null,
+  naverQuotaPct: null,
+  costsForbidden: false,
+};
+
+/** fixture 모드에서도 헤더가 비지 않게 한다 — 서버 없이 화면을 보는 경로를 유지한다. */
+const fixtureOps: OpsSnapshot = {
+  latestRunId: runFixture[0]?.id ?? null,
+  latestRunStatus: runFixture[0]?.status ?? null,
+  approvalCap: todayMetrics.approvalCap,
+  todayKrw: todayMetrics.costKrw,
+  naverQuotaPct: todayMetrics.naverQuotaPct,
+  costsForbidden: false,
+};
+
 interface ReviewState {
   items: ReviewItem[];
   leads: Lead[];
+  ops: OpsSnapshot;
   cursor: number;
   selected: Set<string>;
   openId: string | null;
@@ -58,7 +96,7 @@ type Action =
   | { type: "loading"; value: boolean }
   | { type: "busy"; value: string | null }
   | { type: "notice"; value: Notice | null }
-  | { type: "loaded"; items: ReviewItem[]; leads: Lead[] }
+  | { type: "loaded"; items: ReviewItem[]; leads: Lead[]; ops: OpsSnapshot }
   | { type: "patchItem"; id: string; patch: Partial<ReviewItem> };
 
 function reducer(state: ReviewState, action: Action): ReviewState {
@@ -86,7 +124,7 @@ function reducer(state: ReviewState, action: Action): ReviewState {
     case "notice":
       return { ...state, notice: action.value };
     case "loaded":
-      return { ...state, items: action.items, leads: action.leads, loading: false };
+      return { ...state, items: action.items, leads: action.leads, ops: action.ops, loading: false };
     case "patchItem":
       return {
         ...state,
@@ -98,6 +136,7 @@ function reducer(state: ReviewState, action: Action): ReviewState {
 const initialState: ReviewState = {
   items: DATA_SOURCE === "fixture" ? reviewFixture : [],
   leads: DATA_SOURCE === "fixture" ? leadFixture : [],
+  ops: DATA_SOURCE === "fixture" ? fixtureOps : emptyOps,
   cursor: 0,
   selected: new Set(),
   openId: null,
@@ -142,6 +181,67 @@ function toNotice(err: unknown): Notice {
   return { kind: "error", code: "unknown", message: "알 수 없는 오류가 발생했습니다." };
 }
 
+/**
+ * 승인일 기준 "오늘" (Asia/Seoul).
+ *
+ * ❗ 브라우저 로컬 시간이 아니라 **서울 날짜**여야 한다. 승인 상한 카운터도 서울 날짜
+ *    기준이므로(`(now() at time zone 'Asia/Seoul')::date`), 여기가 어긋나면 화면의
+ *    "오늘 승인 3/50" 과 서버가 세는 값이 달라진다.
+ */
+export const seoulToday = (): string =>
+  new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
+
+const objectValue = (rows: ApiSettingRow[], key: string): Record<string, unknown> | undefined => {
+  const row = rows.find((r) => r.key === key);
+  const value = row?.value;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+};
+
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/**
+ * 운영 컨텍스트를 모은다.
+ *
+ * ❗ 각 호출을 **개별로** 감싼다. 검수자 권한으로 `/api/costs` 는 403 이 오는데, 이걸
+ *    Promise.all 로 묶어 한 번에 실패시키면 비용을 못 본다는 이유로 실행 ID·승인 상한까지
+ *    사라진다. 실패한 항목만 `null` 로 남기고 나머지는 살린다.
+ */
+async function loadOps(): Promise<OpsSnapshot> {
+  const [settings, runs, costs] = await Promise.all([
+    api.settings().then((r) => r.data).catch(() => null),
+    api.runs(1).then((r) => r.data).catch(() => null),
+    api
+      .costs()
+      .then((r) => ({ data: r.data, forbidden: false }))
+      .catch((err) => ({ data: null, forbidden: err instanceof ApiError && err.status === 403 })),
+  ]);
+
+  const latest = runs?.[0];
+  const targets = settings ? (settings.effective["targets"] ?? {}) : {};
+  const naverCap = finiteNumber(objectValue(settings?.rows ?? [], "quota")?.["naver_daily_cap"]);
+  const naverUsed = costs.data
+    ? costs.data.providers
+        .filter((p) => p.provider.startsWith("naver"))
+        .reduce((sum, p) => sum + p.qty, 0)
+    : null;
+
+  return {
+    latestRunId: latest?.id ?? null,
+    latestRunStatus: latest?.status ?? null,
+    approvalCap: finiteNumber(targets["finalMax"]),
+    todayKrw: costs.data ? costs.data.todayKrw : null,
+    // 분모를 모르면 비율도 모른다 — 0% 로 채우면 "여유가 충분하다" 로 읽힌다.
+    naverQuotaPct:
+      naverUsed !== null && naverCap !== null && naverCap > 0
+        ? Math.round((naverUsed / naverCap) * 100)
+        : null,
+    costsForbidden: costs.forbidden,
+  };
+}
+
 export function ReviewProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -149,8 +249,16 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     if (DATA_SOURCE === "fixture") return;
     dispatch({ type: "loading", value: true });
     try {
+      // 검수 목록·리드는 필수다 — 못 받으면 화면이 성립하지 않으므로 그대로 에러를 낸다.
       const [review, leads] = await Promise.all([api.reviewList("pending"), api.leads()]);
-      dispatch({ type: "loaded", items: review.data.map(mapListItem), leads: leads.data.map(mapLead) });
+      // 운영 컨텍스트는 **보조**다. 실패해도 검수는 계속돼야 한다.
+      const ops = await loadOps();
+      dispatch({
+        type: "loaded",
+        items: review.data.map(mapListItem),
+        leads: leads.data.map(mapLead),
+        ops,
+      });
       dispatch({ type: "notice", value: null });
     } catch (err) {
       dispatch({ type: "loading", value: false });
@@ -322,25 +430,31 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
         ...todayMetrics,
         reviewQueue: pending,
         approved: todayMetrics.approved + approvedNow,
-        rejected: todayMetrics.rejected + rejectedNow,
+        rejected: (todayMetrics.rejected ?? 0) + rejectedNow,
         finalLeads: todayMetrics.finalLeads + approvedNow,
       };
     }
-    // ⚠️ 퍼널 상단(수집·분석 건수)과 비용·쿼터는 아직 API 가 주지 않는다.
-    //    /api/runs·/api/costs 가 생기면 여기서 읽는다. 지금은 0 으로 두고 화면이
-    //    "모름" 을 그대로 보여 준다 — 픽스처 숫자를 실데이터처럼 섞지 않는다.
+
+    // ❗ 승인·최종 리드는 **오늘 승인분**이다. `/api/leads` 는 승인일 내림차순이라 오늘 건이
+    //    맨 앞에 오고, 일 상한이 50 이므로 200건 페이지 안에서 오늘 것이 잘릴 일은 없다.
+    const today = seoulToday();
+    const approvedToday = state.leads.filter((lead) => lead.approvedAt === today).length;
+
     return {
-      rawCandidates: 0,
-      analyzed: 0,
+      // ⚠️ `runs.counts` 가 비어 있어(선언만 존재) 퍼널 상단의 출처가 없다. 0 이 아니라 모름이다.
+      rawCandidates: null,
+      analyzed: null,
       reviewQueue: pending,
-      approved: state.leads.length,
-      rejected: 0,
-      finalLeads: state.leads.length,
-      approvalCap: todayMetrics.approvalCap,
-      costKrw: 0,
-      naverQuotaPct: 0,
+      approved: approvedToday,
+      // ⚠️ `/api/review?status=rejected` 는 날짜 스코프가 없어 **누적값**이다. "오늘의 퍼널" 에
+      //    누적값을 넣으면 안 되므로 표시하지 않는다. 목록 응답에 `decided_at` 이 생기면 세운다.
+      rejected: null,
+      finalLeads: approvedToday,
+      approvalCap: state.ops.approvalCap,
+      costKrw: state.ops.todayKrw,
+      naverQuotaPct: state.ops.naverQuotaPct,
     };
-  }, [state.items, state.leads]);
+  }, [state.items, state.leads, state.ops]);
 
   const actions = useMemo<StoreActions>(
     () => ({ refresh, openItem, submitEmail, approve, reject, bulkReject, dismissNotice }),

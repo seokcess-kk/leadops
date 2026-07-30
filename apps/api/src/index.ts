@@ -10,9 +10,11 @@ import { createApi } from "./server";
  *    내려간다 (`session.ts`). 그렇게 해야 RLS 가 적용된 상태로 질의된다.
  *
  * 환경변수:
- *   API_DATABASE_URL      권한 있는 DSN (필수)
- *   SUPABASE_JWT_SECRET   Supabase 프로젝트의 JWT Secret (필수)
- *   API_PORT              기본 8787
+ *   API_DATABASE_URL         권한 있는 DSN (필수)
+ *   SUPABASE_JWT_SECRET      Supabase 프로젝트의 JWT Secret (필수)
+ *   API_PORT                 기본 8787
+ *   INTERNAL_TRIGGER_SECRET  pg_cron → `POST /internal/run` 서명 비밀 (32자 이상)
+ *                            없으면 그 경로가 비활성이다 (401). 조용히 열리지 않는다.
  */
 
 function required(name: string, hint: string): string {
@@ -32,8 +34,17 @@ async function main(): Promise<void> {
   const jwtSecret = required("SUPABASE_JWT_SECRET", "Supabase 대시보드 → Settings → API → JWT Secret");
   const port = Number(process.env["API_PORT"] ?? 8787);
 
+  const internalSecret = process.env["INTERNAL_TRIGGER_SECRET"];
+  if (!internalSecret) {
+    // 부팅을 막지 않는다 — 스케줄러 없이 검수만 운영하는 구성이 정당하다. 다만 조용히
+    // 넘기지도 않는다: 그 경로가 꺼져 있다는 사실이 로그에 남아야 한다.
+    logger.warn("internal.trigger_disabled", {
+      note: "INTERNAL_TRIGGER_SECRET 이 없어 POST /internal/run 이 401 을 돌려줍니다 (pg_cron 스케줄 비활성).",
+    });
+  }
+
   const sql = postgres(dsn, { max: 8, onnotice: () => {} });
-  const server = createApi({ sql, jwtSecret, logger });
+  const server = createApi({ sql, jwtSecret, logger, internalSecret });
 
   const shutdown = (signal: string): void => {
     logger.info("api.shutdown", { signal });

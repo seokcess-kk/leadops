@@ -39,6 +39,10 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: readonly string[] }> = [
   { method: "POST", pattern: ["api", "keywords", ":id", "approve"] },
   { method: "GET", pattern: ["api", "privacy", "requests"] },
   { method: "POST", pattern: ["api", "privacy", "requests"] },
+  { method: "POST", pattern: ["api", "privacy", "requests", ":id", "advance"] },
+  { method: "POST", pattern: ["api", "privacy", "requests", ":id", "access-report"] },
+  { method: "POST", pattern: ["api", "privacy", "requests", ":id", "execute"] },
+  { method: "GET", pattern: ["api", "capacity"] },
 ];
 
 function allowed(method: string, segments: readonly string[]): boolean {

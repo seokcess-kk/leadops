@@ -4,6 +4,7 @@ import { createCandidate, createTestDb, createUser, type Candidate, type TestDb 
 import type { MxResolver } from "@leadops/http";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signInternal } from "./hmac";
 import { signJwt } from "./jwt";
 import { createApi } from "./server";
 
@@ -15,6 +16,8 @@ import { createApi } from "./server";
  */
 
 const SECRET = "integration-secret-0123456789";
+/** pg_cron 트리거 서명 비밀. 32자 이상이어야 `hmac.ts` 가 받아 준다. */
+const INTERNAL_SECRET = "integration-internal-trigger-secret-32";
 
 let db: TestDb;
 let server: Server;
@@ -60,7 +63,13 @@ beforeAll(async () => {
   otherUserId = await createUser(db, "other@leadops.test", "user");
   adminId = await createUser(db, "admin@leadops.test", "admin");
 
-  server = createApi({ sql: db.owner, jwtSecret: SECRET, logger: nullLogger, resolver: goodMx });
+  server = createApi({
+    sql: db.owner,
+    jwtSecret: SECRET,
+    logger: nullLogger,
+    resolver: goodMx,
+    internalSecret: INTERNAL_SECRET,
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }, 120_000);
@@ -895,5 +904,192 @@ describe("경쟁사 수동 교체", () => {
       body: { rank: 1, competitorCompanyId: target.companyId },
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * ❗ 내부 트리거 — JWT 없이 실행을 만들 수 있는 유일한 경로다.
+ *    뚫리면 누구나 파이프라인을 돌려 쿼터와 비용을 소진시킬 수 있다.
+ */
+describe("❗ POST /internal/run (pg_cron HMAC)", () => {
+  /** 서명 헤더를 붙여 호출한다. `call()` 은 Bearer 만 다루므로 직접 fetch 한다. */
+  async function trigger(
+    body: unknown,
+    options: { secret?: string; timestamp?: number; signature?: string } = {},
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const raw = JSON.stringify(body);
+    const ts = options.timestamp ?? Math.floor(Date.now() / 1000);
+    const sig = options.signature ?? signInternal(options.secret ?? INTERNAL_SECRET, ts, raw);
+    const res = await fetch(`${base}/internal/run`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-leadops-timestamp": String(ts),
+        "x-leadops-signature": sig,
+      },
+      body: raw,
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("❗ JWT 로는 통과할 수 없다 (서명 경로다)", async () => {
+    const res = await call("POST", "/internal/run", { token: tokenFor(adminId), body: {} });
+    expect(res.status).toBe(401);
+    expect((res.body as { error: { code: string } }).error.code).toBe("bad_signature");
+  });
+
+  it("❗ 서명이 없으면 401 이다", async () => {
+    const res = await call("POST", "/internal/run", { body: {} });
+    expect(res.status).toBe(401);
+  });
+
+  it("❗ 다른 비밀로 서명하면 거부한다", async () => {
+    const res = await trigger({}, { secret: "another-internal-secret-32-chars-long" });
+    expect(res.status).toBe(401);
+    expect((res.body["error"] as { code: string }).code).toBe("bad_signature");
+  });
+
+  it("❗ 오래된 타임스탬프는 거부한다 (재생 공격)", async () => {
+    const res = await trigger({}, { timestamp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(res.status).toBe(401);
+    expect((res.body["error"] as { code: string }).code).toBe("stale_signature");
+  });
+
+  it("❗ 본문을 바꾸면 서명이 깨진다", async () => {
+    const ts = Math.floor(Date.now() / 1000);
+    const res = await trigger(
+      { industries: ["dental"] },
+      { signature: signInternal(INTERNAL_SECRET, ts, JSON.stringify({ industries: ["derm"] })), timestamp: ts },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("dryRun 은 판정만 하고 실행을 만들지 않는다", async () => {
+    const before = await db.owner<Array<{ n: string }>>`select count(*)::text as n from runs where trigger = 'cron'`;
+    const res = await trigger({ dryRun: true, industries: ["derm"] });
+    expect(res.status).toBe(200);
+    const data = res.body["data"] as { started: boolean; dryRun?: boolean; decision: { should_run: boolean } };
+    expect(data.started).toBe(false);
+    // 주말이면 skipped 로 온다 — 판정 결과를 그대로 확인한다.
+    if (data.decision.should_run) expect(data.dryRun).toBe(true);
+    const after = await db.owner<Array<{ n: string }>>`select count(*)::text as n from runs where trigger = 'cron'`;
+    expect(after[0]!.n).toBe(before[0]!.n);
+  });
+
+  it("❗ 알 수 없는 업종은 400 이다 (서명이 맞아도 입력은 검증한다)", async () => {
+    const res = await trigger({ industries: ["nope"] });
+    expect(res.status).toBe(400);
+  });
+
+  it("❗ 같은 날 두 번 불러도 cron 실행은 하나만 만들어진다", async () => {
+    await db.owner`delete from runs where trigger = 'cron'`;
+
+    const first = await trigger({ industries: ["derm"] });
+    expect(first.status).toBe(200);
+    const firstData = first.body["data"] as { started: boolean; skipped?: boolean; decision: { reasons: string[] } };
+
+    // 주말에는 판정이 건너뛰기이므로, 그 경우는 사유를 확인하고 끝낸다.
+    if (!firstData.started) {
+      expect(firstData.decision.reasons).toContain("not_a_weekday");
+      return;
+    }
+
+    const second = await trigger({ industries: ["derm"] });
+    expect(second.status).toBe(200);
+    const secondData = second.body["data"] as { started: boolean; skipped: boolean; decision: { reasons: string[] } };
+    expect(secondData.started).toBe(false);
+    expect(secondData.skipped).toBe(true);
+    expect(secondData.decision.reasons).toContain("already_ran_today");
+
+    const [row] = await db.owner<Array<{ n: string }>>`select count(*)::text as n from runs where trigger = 'cron'`;
+    expect(row?.n).toBe("1");
+
+    // 감사 로그에 남는다 (행위자는 null — 사람이 아니다).
+    const [audit] = await db.owner<Array<{ n: string; actor: string | null }>>`
+      select count(*)::text as n, min(actor::text) as actor from audit_log where action = 'run.schedule'
+    `;
+    expect(audit?.n).toBe("1");
+    expect(audit?.actor).toBeNull();
+
+    await db.owner`delete from runs where trigger = 'cron'`;
+  });
+});
+
+describe("개인정보 워크플로 API", () => {
+  async function open(kind: string, subject: string): Promise<string> {
+    const res = await call<{ data: { request_id: string } }>("POST", "/api/privacy/requests", {
+      token: tokenFor(userId),
+      body: { kind, subject },
+    });
+    expect(res.status).toBe(200);
+    return res.body.data.request_id;
+  }
+
+  it("접수는 일반 사용자도 할 수 있다 (정보주체의 법정 권리)", async () => {
+    const id = await open("access", "subject@example.kr");
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("❗ 목록은 admin 전용이다 (요청자 식별자가 남에게 보이면 그 자체가 유출)", async () => {
+    const res = await call("GET", "/api/privacy/requests", { token: tokenFor(userId) });
+    expect(res.status).toBe(403);
+  });
+
+  it("상태 전이는 admin 만 하고 사유 없는 보류를 거절한다", async () => {
+    const id = await open("delete", "hold-api@example.kr");
+
+    const denied = await call("POST", `/api/privacy/requests/${id}/advance`, {
+      token: tokenFor(userId),
+      body: { status: "in_progress" },
+    });
+    expect(denied.status).toBe(403);
+
+    const noReason = await call("POST", `/api/privacy/requests/${id}/advance`, {
+      token: tokenFor(adminId),
+      body: { status: "on_hold" },
+    });
+    expect(noReason.status).toBe(400);
+
+    const ok = await call("POST", `/api/privacy/requests/${id}/advance`, {
+      token: tokenFor(adminId),
+      body: { status: "on_hold", note: "본인 확인 대기" },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("❗ 열람 보고서는 POST 다 (감사 기록을 남기는 동작이라 GET 이면 안 된다)", async () => {
+    const id = await open("access", "report@example.kr");
+    const wrongMethod = await call("GET", `/api/privacy/requests/${id}/access-report`, {
+      token: tokenFor(adminId),
+    });
+    expect(wrongMethod.status).toBe(404);
+
+    const res = await call<{ data: { note: string; emails: unknown[] } }>(
+      "POST",
+      `/api/privacy/requests/${id}/access-report`,
+      { token: tokenFor(adminId) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.note).toContain("자동 수집하지 않습니다");
+  });
+
+  it("❗ 주체를 특정하지 못한 삭제 요청은 409 다 (조용히 0건 처리하지 않는다)", async () => {
+    const id = await open("delete", "unknown-subject@example.kr");
+    const res = await call("POST", `/api/privacy/requests/${id}/execute`, { token: tokenFor(adminId) });
+    expect(res.status).toBe(409);
+  });
+
+  it("용량 리포트는 admin 전용이다", async () => {
+    const denied = await call("GET", "/api/capacity", { token: tokenFor(userId) });
+    expect(denied.status).toBe(403);
+
+    const res = await call<{ data: { capacity: { level: string }; tables: unknown[] } }>(
+      "GET",
+      "/api/capacity",
+      { token: tokenFor(adminId) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.capacity.level).toBe("ok");
+    expect(res.body.data.tables.length).toBeGreaterThan(10);
   });
 });

@@ -27,13 +27,16 @@ LeadOps 워커
 명령:
   worker              큐를 계속 비운다 (Ctrl+C 로 안전 종료)
   run                 새 실행을 만들고 끝까지 처리한다
+  schedule            스케줄 판정 후 조건이 맞으면 cron 실행을 만든다
   reap                만료된 lease 를 회수한다 (cron 으로 1분마다)
-  cleanup             보존기간이 지난 데이터를 정리한다
+  cleanup             보존기간이 지난 데이터를 정리한다 (용량 인식)
+  capacity            DB 용량과 임계 레벨을 출력한다
 
 옵션:
   --industry <a,b>    대상 업종 (기본: 전체)
   --limit <n>         업종당 수집 상한 (기본 500)
   --max-jobs <n>      처리할 잡 수 상한
+  --dry-run           schedule: 판정만 하고 실행하지 않는다
   --log <level>       debug|info|warn|error
 
 환경변수:
@@ -157,17 +160,70 @@ async function main(): Promise<number> {
         );
         return run?.status === "failed" ? 1 : 0;
       }
+      /**
+       * 스케줄 판정 → 실행.
+       *
+       * ❗ 운영에서는 pg_cron 이 `POST /internal/run` 을 부른다. 이 명령은 **같은 판정 함수**
+       *    (`should_start_scheduled_run`)를 쓰는 로컬·수동 경로다 — 판정 규칙이 DB 한 곳에만
+       *    있으므로 두 경로가 갈라지지 않는다.
+       */
+      case "schedule": {
+        const [row] = await sql<Array<{ d: { should_run: boolean; run_date: string; reasons: string[] } }>>`
+          select public.should_start_scheduled_run() as d
+        `;
+        const decision = row!.d;
+        if (!decision.should_run) {
+          logger.info("schedule.skipped", { reasons: decision.reasons, runDate: decision.run_date });
+          process.stdout.write(`\n건너뜀: ${decision.reasons.join(", ")}\n\n`);
+          return 0;
+        }
+        if (args.flags["dry-run"] === true) {
+          process.stdout.write(`\n실행 조건 충족 (run_date ${decision.run_date}). --dry-run 이라 만들지 않습니다.\n\n`);
+          return 0;
+        }
+        const industries = parseIndustries(args.flags["industry"]);
+        const limit = typeof args.flags["limit"] === "string" ? Number(args.flags["limit"]) : 500;
+        const started = await startRun(sql, {
+          trigger: "cron",
+          runDate: decision.run_date,
+          industries,
+          perIndustryLimit: limit,
+          logger,
+        });
+        process.stdout.write(`\ncron 실행 ${started.runId} 생성 (run_date ${decision.run_date})\n\n`);
+        return 0;
+      }
       case "reap": {
         const [row] = await sql<Array<{ reap_expired_jobs: number }>>`select public.reap_expired_jobs()`;
         logger.info("reap.done", { requeued: row?.reap_expired_jobs ?? 0 });
         return 0;
       }
       case "cleanup": {
-        const [row] = await sql<Array<{ cleanup_old_data: Record<string, number> }>>`
-          select public.cleanup_old_data()
+        // ❗ 용량 인식 정리. 평시에는 기본 보존기간만 적용하고, 85% 이상에서만 공격적으로
+        //    줄인다 — 평시에 공격적으로 지우면 회귀 입력과 감사 추적이 사라진다.
+        const [row] = await sql<Array<{ cleanup_by_capacity: Record<string, unknown> }>>`
+          select public.cleanup_by_capacity()
         `;
-        logger.info("cleanup.done", row?.cleanup_old_data ?? {});
+        logger.info("cleanup.done", row?.cleanup_by_capacity ?? {});
+        process.stdout.write(`\n${JSON.stringify(row?.cleanup_by_capacity ?? {}, null, 2)}\n\n`);
         return 0;
+      }
+      case "capacity": {
+        const [row] = await sql<Array<{ db_capacity: Record<string, unknown> }>>`select public.db_capacity()`;
+        const cap = row!.db_capacity;
+        const level = String(cap["level"]);
+        process.stdout.write(
+          `\nDB 용량 ${cap["pct"]}%  (${cap["bytes"]} / ${cap["limit_bytes"]} bytes)  레벨: ${level}\n` +
+            (level === "ok"
+              ? "\n"
+              : level === "warn"
+                ? "  ⚠ 70% 초과 — 보존기간·이전 계획을 점검하세요.\n\n"
+                : level === "cleanup"
+                  ? "  ⚠ 85% 초과 — 정리 잡이 보존기간을 줄입니다 (pnpm worker cleanup).\n\n"
+                  : "  ✗ 90% 초과 — 신규 실행이 차단됩니다.\n\n"),
+        );
+        // ❗ 차단 레벨은 종료 코드로도 알린다. 모니터링이 stdout 을 파싱하게 만들지 않는다.
+        return level === "block" ? 1 : 0;
       }
       default:
         process.stderr.write(`알 수 없는 명령: ${args.command}\n${HELP}`);

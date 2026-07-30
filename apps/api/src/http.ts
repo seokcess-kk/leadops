@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Logger } from "@leadops/core";
+import { HmacError } from "./hmac";
 import { JwtError } from "./jwt";
 
 /**
@@ -59,6 +60,28 @@ const DB_ERROR_MAP: ReadonlyArray<{ match: RegExp; status: number; code: string;
   { match: /no_attempt|nothing_to_retry/, status: 409, code: "nothing_to_retry", message: "재시도할 작업이 없습니다" },
   { match: /self_is_not_competitor/, status: 400, code: "self_is_not_competitor", message: "자기 자신을 경쟁사로 지정할 수 없습니다" },
   { match: /invalid_kind|subject_required/, status: 400, code: "bad_request", message: "요청 내용이 올바르지 않습니다" },
+  // ── Phase 7 (개인정보 · 용량) ──
+  { match: /reason_required/, status: 400, code: "reason_required", message: "사유가 필요합니다" },
+  { match: /invalid_transition/, status: 409, code: "invalid_transition", message: "허용되지 않는 상태 전이입니다" },
+  {
+    match: /subject_not_matched/,
+    status: 409,
+    code: "subject_not_matched",
+    message: "요청 주체를 특정할 수 없습니다. 보유한 이메일과 연결되지 않아 무엇을 처리할지 알 수 없습니다",
+  },
+  {
+    match: /legal_hold/,
+    status: 409,
+    code: "legal_hold",
+    message: "보존 의무(legal hold)가 걸려 있어 집행할 수 없습니다. 사유를 남기고 보류하세요",
+  },
+  // ❗ 503 이다. 우리 버그가 아니고 재시도로 해결되지도 않는다 — 운영자가 정리해야 한다.
+  {
+    match: /capacity_exceeded/,
+    status: 503,
+    code: "capacity_exceeded",
+    message: "DB 용량 상한에 도달해 신규 실행을 만들 수 없습니다. 정리 후 다시 시도하세요",
+  },
   { match: /no_data_found|query returned no rows/i, status: 404, code: "not_found", message: "찾을 수 없습니다" },
   { match: /permission denied/i, status: 403, code: "forbidden", message: "권한이 없습니다" },
   { match: /(^|[^a-z])forbidden([^a-z]|$)/, status: 403, code: "forbidden", message: "권한이 없습니다 (admin 필요)" },
@@ -67,6 +90,9 @@ const DB_ERROR_MAP: ReadonlyArray<{ match: RegExp; status: number; code: string;
 export function toApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
   if (err instanceof JwtError) return new ApiError(401, "unauthenticated", err.message);
+  // ❗ 서명 실패를 500 으로 내리지 않는다. 401 이어야 호출자(pg_cron)가 "설정 문제" 로 알아본다.
+  //    반대로 4xx 로 뭉개면 우리 버그와 섞이므로 코드를 그대로 넘긴다.
+  if (err instanceof HmacError) return new ApiError(401, err.code, err.message);
 
   const message = err instanceof Error ? err.message : String(err);
   for (const entry of DB_ERROR_MAP) {
@@ -143,7 +169,16 @@ export class Router {
   }
 }
 
-/** 본문을 상한까지만 읽는다. 넘으면 스트림을 끊는다. */
+/**
+ * 본문을 상한까지만 읽는다. 넘으면 스트림을 끊는다.
+ *
+ * ❗ 스트림은 **한 번만** 읽을 수 있다. HMAC 서명 검증처럼 라우팅 전에 원문이 필요한 경로는
+ *    여기서 읽은 문자열을 `makeCtx` 에 넘겨야 한다 — 두 번 읽으면 두 번째가 영원히 멈춘다.
+ */
+export async function readRawBody(req: IncomingMessage): Promise<string> {
+  return readBody(req);
+}
+
 async function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -182,9 +217,24 @@ export function makeCtx(
   params: Record<string, string>,
   userId: string,
   logger: Logger,
+  /** 이미 읽어 둔 본문 원문. 서명 검증 경로에서 넘긴다 (스트림은 한 번만 읽힌다). */
+  rawBody?: string,
 ): Ctx {
   let cached: unknown;
   let read = false;
+
+  if (rawBody !== undefined) {
+    if (rawBody.trim() === "") {
+      cached = {};
+    } else {
+      try {
+        cached = JSON.parse(rawBody);
+      } catch {
+        throw badRequest("본문이 JSON 이 아닙니다");
+      }
+    }
+    read = true;
+  }
   return {
     req,
     res,

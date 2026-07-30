@@ -15,5 +15,9 @@ fixtures/goldset.csv
 # (설계서 11장: 가짜 응답만으로 완료 처리하지 않는다). recordFixture 가 항목을 5건으로
 # 잘라 저장하므로 diff 를 읽을 수 있고, 공개 데이터라 재배포도 허용돼 있다.
 
+# E2E 산출물 (리포트·트레이스·실패 스크린샷)
+apps/e2e/playwright-report/
+apps/e2e/test-results/
+
 .DS_Store
 Thumbs.db
