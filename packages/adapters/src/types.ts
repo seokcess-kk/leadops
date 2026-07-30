@@ -26,13 +26,18 @@ export interface SourceAdapter {
   readonly verifiedAgainstLiveApi: boolean;
 
   /** 모집단 크기 실측 (설계서 M0). 페이지 1 의 totalCount 만 읽으므로 저렴하다. */
-  countUniverse(industry: Industry): Promise<UniverseCount>;
+  countUniverse(industry: Industry, options?: { scope?: import("./hira").HiraScope }): Promise<UniverseCount>;
 
   /** 후보를 페이지 단위로 흘려보낸다. */
   fetchCandidates(industry: Industry, options: FetchCandidatesOptions): AsyncIterable<RawCandidate>;
 }
 
 export interface FetchCandidatesOptions {
+  /**
+   * 수집 범위. HIRA 는 `name`(기관명에 과목명이 든 곳)과 `specialty`(그 과목을
+   * 신고한 곳)의 모집단이 10배 차이 난다. 기본값은 어댑터가 정한다.
+   */
+  scope?: import("./hira").HiraScope;
   /** 최대 반환 개수. 스파이크에서 표본을 뽑을 때 쓴다. */
   limit?: number;
   /** 시·도 코드 등 소스별 필터. */

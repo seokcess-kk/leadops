@@ -4,6 +4,7 @@ export * from "./html";
 export * from "./aggregators";
 export * from "./contactPages";
 export * from "./channels";
+export * from "./collection";
 export * from "./activity";
 export * from "./keywords";
 export * from "./official";

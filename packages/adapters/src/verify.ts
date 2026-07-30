@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { LeadOpsError, redactUrl, type Industry, type Logger } from "@leadops/core";
 import type { HttpClient } from "@leadops/http";
 import { encodeServiceKey } from "./dataGoKr";
-import { HIRA_CODES, type HiraHospitalItem } from "./hira";
+import { HIRA_CODES, NAME_KEYWORD, type HiraHospitalItem } from "./hira";
 import type { FtcBrandItem } from "./ftc";
 
 /**
@@ -256,13 +256,6 @@ function recordFixture(dir: string | undefined, name: string, body: string): str
 }
 
 // ── HIRA ─────────────────────────────────────────────────────────────────────
-
-/** 업종별로 기관명에 들어 있을 것으로 기대하는 키워드. 코드값 검사의 기준이 된다. */
-const NAME_KEYWORD: Record<Exclude<Industry, "franchise">, string> = {
-  derm: "피부과",
-  plastic: "성형외과",
-  dental: "치과",
-};
 
 const HIRA_PARAMS: Record<Exclude<Industry, "franchise">, Record<string, string>> = {
   derm: { dgsbjtCd: HIRA_CODES.dgsbjt_derm, clCd: HIRA_CODES.cl_clinic },

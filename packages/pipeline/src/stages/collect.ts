@@ -1,5 +1,6 @@
 import { adapterFor, type SourceAdapter } from "@leadops/adapters";
 import { configError, Industry, RawCandidate } from "@leadops/core";
+import { collectionSettingsFrom } from "../collection";
 import { countSkip, emptyResult, type StageContext, type StageHandler, type StageResult } from "./types";
 
 /**
@@ -19,6 +20,8 @@ export const collectStage: StageHandler = {
     const industry = Industry.parse(payload["industry"]);
     const limit = typeof payload["limit"] === "number" ? payload["limit"] : 500;
 
+    // 수집 범위는 설정에서 온다 (발주자 결정 · 되돌릴 수 있어야 한다).
+    const { hiraScope } = collectionSettingsFrom(ctx.settings);
     const adapter: SourceAdapter = adapterFor(ctx.adapters, industry);
     if (!adapter.verifiedAgainstLiveApi) {
       // 막지는 않는다 — 검증 전에도 파이프라인을 돌려봐야 하기 때문이다.
@@ -55,7 +58,7 @@ export const collectStage: StageHandler = {
       batch.length = 0;
     };
 
-    for await (const candidate of adapter.fetchCandidates(industry, { limit })) {
+    for await (const candidate of adapter.fetchCandidates(industry, { limit, scope: hiraScope })) {
       result.processed++;
       const parsed = RawCandidate.safeParse(candidate);
       if (!parsed.success) {
@@ -73,7 +76,7 @@ export const collectStage: StageHandler = {
     }
     await flush();
 
-    result.note = `${adapter.sourceName} → ${result.passed}건 적재`;
+    result.note = `${adapter.sourceName} → ${result.passed}건 적재 (범위: ${hiraScope})`;
     return result;
   },
 };

@@ -8,7 +8,7 @@ import {
   type Logger,
   type UniverseCount,
 } from "@leadops/core";
-import { adapterFor, createSourceAdapters, unverifiedAdapters } from "@leadops/adapters";
+import { DEFAULT_HIRA_SCOPE, adapterFor, createSourceAdapters, unverifiedAdapters } from "@leadops/adapters";
 import { createHttpClient } from "@leadops/http";
 import { renderTable } from "./cli";
 
@@ -132,7 +132,10 @@ export function formatUniverseReport(report: UniverseReport): string {
 
   return [
     "",
-    "■ 모집단 크기 (M0)",
+    `■ 모집단 크기 (M0) — 수집 범위: ${DEFAULT_HIRA_SCOPE}`,
+    DEFAULT_HIRA_SCOPE === "name"
+      ? "  기관명에 과목명이 든 곳만 셉니다. 진료과목 신고 기준으로 넓히려면 settings.collection.hira_scope 를 specialty 로."
+      : "  ⚠️ 진료과목 신고 기준입니다. 피부과는 전체 의원의 45%가 신고하므로 일반의원이 대량 포함됩니다.",
     "",
     renderTable(["업종", "소스", "전체", "기본통과 추정", "비고"], countRows),
     "",

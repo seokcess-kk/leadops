@@ -38,6 +38,32 @@ const ENDPOINT = "https://apis.data.go.kr/B551182/hospInfoServicev2/getHospBasis
  *    `pnpm spike verify` 가 경험적으로 확인합니다 — 코드가 맞으면 반환된 기관명의
  *    80% 이상에 해당 키워드가 들어 있고, 틀리면 5% 미만입니다.
  */
+/**
+ * 수집 범위 (`HIRA_SCOPE`) — **이 값이 모집단을 10배 바꾼다.**
+ *
+ * | scope | 피부과 | 성형외과 | 뜻 |
+ * |---|---:|---:|---|
+ * | `name` (기본) | 1,555 | 1,236 | 기관명에 과목명이 든 곳 — 그 과를 **표방하는** 의원 |
+ * | `specialty` | 16,987 | 4,883 | 그 과목을 **신고한** 곳 — 피부 시술 겸하는 일반의원 포함 |
+ *
+ * 발주자 결정(2026-07-30): **`name`**. 피부과 신고는 전체 의원의 45%가 하고 있어
+ * `specialty` 로 모으면 "피부과 마케팅" 이 맞지 않는 일반의원이 대량 섞인다.
+ *
+ * 되돌릴 수 있도록 **설정값**으로 둔다 (`settings.collection.hira_scope`).
+ * 코드를 고치지 않고 넓힐 수 있어야 한다.
+ */
+export type HiraScope = "name" | "specialty";
+export const DEFAULT_HIRA_SCOPE: HiraScope = "name";
+
+/**
+ * `scope = 'name'` 에서 기관명에 요구하는 키워드.
+ *
+ * 실측(2026-07-30): `피부` 로 넓히면 1,559곳(+4), `성형` 은 1,237곳(+1)이다.
+ * 차이가 무의미하므로 과목명 그대로 쓴다 — 짧은 키워드는 오탐 위험만 늘린다.
+ * 이름에 두 과목이 다 든 의원은 2곳뿐이라 업종 간 중복은 무시할 수준이다.
+ */
+export const NAME_KEYWORD = { derm: "피부과", plastic: "성형외과", dental: "치과" } as const;
+
 export const HIRA_CODES = {
   /**
    * 진료과목: 피부과 — ✅ **확정** (2026-07-30 실키, 전수 카운트)
@@ -120,14 +146,24 @@ export class HiraHospitalAdapter implements SourceAdapter {
     this.#client = new DataGoKrClient(http, serviceKey);
   }
 
-  /** 업종을 HIRA 질의 파라미터로 옮긴다. */
-  #paramsFor(industry: Industry): Record<string, string> {
+  /**
+   * 업종을 HIRA 질의 파라미터로 옮긴다.
+   *
+   * `scope` 가 모집단을 10배 바꾼다 — `HIRA_SCOPE` 주석 참고.
+   */
+  #paramsFor(industry: Industry, scope: HiraScope): Record<string, string> {
     switch (industry) {
       case "derm":
-        return { dgsbjtCd: HIRA_CODES.dgsbjt_derm, clCd: HIRA_CODES.cl_clinic };
+        return scope === "name"
+          ? { yadmNm: NAME_KEYWORD.derm, clCd: HIRA_CODES.cl_clinic }
+          : { dgsbjtCd: HIRA_CODES.dgsbjt_derm, clCd: HIRA_CODES.cl_clinic };
       case "plastic":
-        return { dgsbjtCd: HIRA_CODES.dgsbjt_plastic, clCd: HIRA_CODES.cl_clinic };
+        return scope === "name"
+          ? { yadmNm: NAME_KEYWORD.plastic, clCd: HIRA_CODES.cl_clinic }
+          : { dgsbjtCd: HIRA_CODES.dgsbjt_plastic, clCd: HIRA_CODES.cl_clinic };
       case "dental":
+        // 치과는 **종별** 코드다. 기관 종류이므로 이름이 곧 종류이고(실측 100%),
+        // scope 를 나눌 이유가 없다.
         return { clCd: HIRA_CODES.cl_dental_clinic };
       case "franchise":
         throw new Error("HIRA 어댑터는 프랜차이즈를 지원하지 않습니다");
@@ -138,10 +174,10 @@ export class HiraHospitalAdapter implements SourceAdapter {
     }
   }
 
-  async countUniverse(industry: Industry): Promise<UniverseCount> {
+  async countUniverse(industry: Industry, options: { scope?: HiraScope } = {}): Promise<UniverseCount> {
     const env = await this.#client.get<HiraHospitalItem>({
       endpoint: ENDPOINT,
-      params: { ...this.#paramsFor(industry), pageNo: 1, numOfRows: 1 },
+      params: { ...this.#paramsFor(industry, options.scope ?? DEFAULT_HIRA_SCOPE), pageNo: 1, numOfRows: 1 },
     });
     return {
       industry,
@@ -158,7 +194,7 @@ export class HiraHospitalAdapter implements SourceAdapter {
   async *fetchCandidates(industry: Industry, options: FetchCandidatesOptions = {}): AsyncIterable<RawCandidate> {
     const pageSize = options.pageSize ?? 100;
     const limit = options.limit ?? Number.POSITIVE_INFINITY;
-    const base = this.#paramsFor(industry);
+    const base = this.#paramsFor(industry, options.scope ?? DEFAULT_HIRA_SCOPE);
 
     let emitted = 0;
     for (let pageNo = 1; emitted < limit; pageNo++) {

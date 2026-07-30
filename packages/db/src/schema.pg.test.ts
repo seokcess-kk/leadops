@@ -31,6 +31,7 @@ describe("마이그레이션", () => {
       "0006_seed.sql",
       "0007_raw_candidates.sql",
       "0008_channel_saturation.sql",
+      "0009_collection_scope.sql",
     ]);
   });
 
