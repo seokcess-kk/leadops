@@ -140,6 +140,7 @@ const blank: GoldsetRow = {
 const row = (id: string, over: Partial<GoldsetRow> = {}): GoldsetRow => ({ ...blank, externalId: id, ...over });
 
 const verdict = (over: Partial<SystemVerdict> = {}): SystemVerdict => ({
+  hasWebsite: true,
   officialJudged: null,
   contactPaths: [],
   orsComputed: false,
@@ -177,6 +178,43 @@ describe("computeMetrics — 미측정 처리", () => {
     // 분모는 라벨된 1건뿐이어야 한다 — 3건으로 세면 33% 가 되어 stop 게이트가 오작동한다.
     expect(m3b.proportion?.denominator).toBe(1);
     expect(m3b.proportion?.point).toBe(1);
+  });
+});
+
+describe("computeMetrics — M1 (우리의 발견률 vs 실제 존재율)", () => {
+  /**
+   * ❗ M1 은 **우리가 URL 을 확보한 비율**이다. 사람이 찾은 비율이 아니다.
+   *    미달 대응이 "소스 보강"(설계서 9.1)이므로, 우리가 통제할 수 있는 값을 재야 한다 —
+   *    사람이 찾은 비율은 소스를 보강해도 바뀌지 않는 모집단 특성이다.
+   */
+  const rows = [
+    row("a", { labelOfficialStatus: "official" }),
+    row("b", { labelOfficialStatus: "official" }),
+    row("c", { labelOfficialStatus: "official" }),
+    row("d", { labelOfficialStatus: "none" }),
+  ];
+  const verdicts = new Map<string, SystemVerdict>([
+    [verdictKey("hira", "a"), verdict({ hasWebsite: true })],
+    [verdictKey("hira", "b"), verdict({ hasWebsite: false })],
+    [verdictKey("hira", "c"), verdict({ hasWebsite: false })],
+    [verdictKey("hira", "d"), verdict({ hasWebsite: false })],
+  ]);
+
+  it("M1 은 우리가 URL 을 확보한 비율이다 (분모: 매칭된 표본 전체)", () => {
+    const { metrics } = computeMetrics(rows, verdicts);
+    const m1 = metric(metrics, "M1");
+    // 1/4 — URL 이 없어 판정조차 못 한 업체가 분모에서 빠지면 발견률의 의미가 사라진다.
+    expect(m1.proportion?.numerator).toBe(1);
+    expect(m1.proportion?.denominator).toBe(4);
+  });
+
+  it("M1-상한 은 사람이 확인한 실제 존재율이다 (우리 발견률의 천장)", () => {
+    const { metrics } = computeMetrics(rows, verdicts);
+    const ceiling = metric(metrics, "M1-상한");
+    expect(ceiling.proportion?.numerator).toBe(3);
+    expect(ceiling.proportion?.denominator).toBe(4);
+    // ❗ 상한에는 기준이 없다 (실측 지표다). 기준을 붙이면 모집단을 우리 성적으로 오해한다.
+    expect(ceiling.threshold).toBeUndefined();
   });
 });
 

@@ -183,6 +183,14 @@ export const verdictKey = (source: string, externalId: string): string =>
   JSON.stringify([source, externalId]);
 
 export interface SystemVerdict {
+  /**
+   * 우리가 **평가할 홈페이지 URL 을 확보했나** (M1).
+   *
+   * ❗ 판정 결과가 아니라 **입력을 가졌는가**다. HIRA 의 `hospUrl` 은 실측 19% 만 채워져
+   *    있어서(표본 90건), URL 이 없으면 `homepage_detect` 는 판정 자체를 하지 못한다.
+   *    M1 의 미달 대응이 "소스 보강" 인 이유가 이것이다.
+   */
+  hasWebsite: boolean;
   /** 우리가 공식(confirmed·likely)으로 판정했나. 관측이 없으면 null (판정 못 함). */
   officialJudged: boolean | null;
   /** 우리가 제안한 연락처 페이지 경로들. */
@@ -212,6 +220,7 @@ export async function loadSystemVerdicts(
   const found = await sql<Array<{
     source: string;
     external_id: string;
+    has_website: boolean;
     official_judged: boolean | null;
     contact_paths: string[] | null;
     ors_computed: boolean;
@@ -227,6 +236,8 @@ export async function loadSystemVerdicts(
         and rc.company_id is not null
     )
     select s.source, s.external_id,
+           -- M1: 평가할 URL 을 확보했나. 판정 결과가 아니라 입력 유무다.
+           exists (select 1 from websites w where w.company_id = s.company_id) as has_website,
            -- 공식 판정: 가장 최근 관측 기준. 관측이 없으면 null (판정하지 못했다).
            (select o.official_status in ('confirmed', 'likely')
               from websites w
@@ -247,6 +258,7 @@ export async function loadSystemVerdicts(
   const map = new Map<string, SystemVerdict>();
   for (const row of found) {
     map.set(verdictKey(row.source, row.external_id), {
+      hasWebsite: row.has_website,
       officialJudged: row.official_judged,
       contactPaths: row.contact_paths ?? [],
       orsComputed: row.ors_computed,
@@ -303,16 +315,33 @@ export function computeMetrics(
   const metrics: Metric[] = [];
   const labelled: Record<string, number> = {};
 
-  // ── M1 홈페이지 발견률 ── 사람이 공식 홈페이지를 찾은 비율
+  // ── M1 홈페이지 발견률 ──
+  //
+  // ❗ **우리의 발견률**이다 (사람이 찾은 비율이 아니다). 미달 시 대응이 "소스 보강"
+  //    (설계서 9.1)인 이유가 이것이다 — 사람이 찾은 비율은 우리가 소스를 보강해도
+  //    바뀌지 않는 모집단 특성이므로, 그 값으로는 "소스를 보강해야 한다" 를 판단할 수 없다.
+  //    분모는 표본 전체다: URL 이 없어 판정조차 못 한 업체가 빠지면 발견률의 의미가 사라진다.
+  const matched = rows.filter((r) => sys(r) !== undefined);
+  metrics.push(
+    matched.length === 0
+      ? unmeasured("M1", "홈페이지 발견률 (우리)", "매칭된 표본이 없습니다 (파이프라인 미실행?)", "≥ 70%")
+      : {
+          id: "M1",
+          label: "홈페이지 발견률 (우리)",
+          threshold: "≥ 70%",
+          proportion: wilson(matched.filter((r) => sys(r)!.hasWebsite).length, matched.length),
+        },
+  );
+
+  // ── M1-상한 (실측) ── 사람이 확인한 **실제 존재율**. 우리 발견률의 천장이다.
   const m1Rows = rows.filter((r) => labelledOfficial(r) !== null);
   labelled["official_status"] = m1Rows.length;
   metrics.push(
     m1Rows.length === 0
-      ? unmeasured("M1", "홈페이지 발견률", "label_official_status 가 비어 있습니다", "≥ 70%")
+      ? unmeasured("M1-상한", "실제 홈페이지 존재율 (사람)", "label_official_status 가 비어 있습니다")
       : {
-          id: "M1",
-          label: "홈페이지 발견률",
-          threshold: "≥ 70%",
+          id: "M1-상한",
+          label: "실제 홈페이지 존재율 (사람)",
           proportion: wilson(m1Rows.filter((r) => labelledOfficial(r) === true).length, m1Rows.length),
         },
   );
