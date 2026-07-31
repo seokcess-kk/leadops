@@ -52,11 +52,20 @@ export async function middleware(request: NextRequest) {
   const devLogin =
     process.env["LEADOPS_DEV_LOGIN"] === "1" && process.env.NODE_ENV !== "production";
 
+  // ❗ setAll 이 모은 쿠키(리프레시 회전분)와 캐시 헤더는 **어떤 응답으로 나가든** 실려야
+  //    한다. 리다이렉트에서 빠뜨리면 회전된 리프레시 토큰이 유실돼 조용히 로그아웃된다.
+  const withAuthCookies = (res: NextResponse): NextResponse => {
+    for (const cookie of response.cookies.getAll()) res.cookies.set(cookie);
+    const cacheControl = response.headers.get("cache-control");
+    if (cacheControl) res.headers.set("cache-control", cacheControl);
+    return res;
+  };
+
   if (!hasSession && !devLogin && !isPublic) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return withAuthCookies(NextResponse.redirect(new URL("/login", request.url)));
   }
   if (hasSession && pathname === "/login") {
-    return NextResponse.redirect(new URL("/today", request.url));
+    return withAuthCookies(NextResponse.redirect(new URL("/today", request.url)));
   }
   return response;
 }
