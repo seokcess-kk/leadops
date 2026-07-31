@@ -114,6 +114,18 @@ export function Sidebar() {
           <span className="truncate text-xs text-fg-3">{me?.email ?? "—"}</span>
           <span className="mono-label text-[8px]">{roleLabel}</span>
         </div>
+        <button
+          type="button"
+          aria-label="로그아웃"
+          onClick={() => {
+            void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+              window.location.href = "/login";
+            });
+          }}
+          className="ml-auto shrink-0 rounded-full px-2 py-1 font-mono text-[9px] uppercase tracking-[0.15em] text-fg-3 transition-colors hover:text-hoverlink"
+        >
+          Out
+        </button>
       </div>
     </aside>
   );
