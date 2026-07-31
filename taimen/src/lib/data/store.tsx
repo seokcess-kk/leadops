@@ -244,7 +244,7 @@ async function loadOps(): Promise<OpsSnapshot> {
   const seoulDate = (iso: string): string =>
     new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date(iso));
   // ❗ 오늘 run 의 counts 만 퍼널에 쓴다. 어제 실행의 수집량을 오늘 것처럼 보여 주지 않는다.
-  const todayCounts = latest?.run_date === today ? latest.counts : {};
+  const todayCounts = latest && seoulDate(latest.run_date) === today ? latest.counts : {};
 
   return {
     latestRunId: latest?.id ?? null,

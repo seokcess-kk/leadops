@@ -271,7 +271,7 @@ export function mapDetail(payload: ApiReviewDetail): ReviewItem {
       channel: h.channel_type,
       // 제목이 없으면 URL 을 보여 준다 — 링크가 무엇인지는 알려야 한다.
       title: h.title ?? h.url,
-      date: h.published_at ?? "",
+      date: h.published_at ? h.published_at.slice(0, 10) : "",
       official: h.is_official,
     })),
     contactPages: contactPagesOf(payload.contactPages),
