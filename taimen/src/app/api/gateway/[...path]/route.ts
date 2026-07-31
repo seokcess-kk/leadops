@@ -67,7 +67,7 @@ async function forward(req: Request, segments: string[]): Promise<Response> {
 
   let token: string;
   try {
-    token = sessionToken();
+    token = await sessionToken();
   } catch (err) {
     if (err instanceof AuthUnavailableError) {
       return json(401, { error: { code: "auth_unavailable", message: err.message } });
