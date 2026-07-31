@@ -49,8 +49,12 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((re) => re.test(pathname));
-  const devLogin =
-    process.env["LEADOPS_DEV_LOGIN"] === "1" && process.env.NODE_ENV !== "production";
+  // dev login(E2E·로컬) 또는 fixture 모드(서버 없이 화면만)는 가드를 통과한다 —
+  // 둘 다 비프로덕션 전용이고, 막으면 로그인이 503(auth_unconfigured) 막다른 길이 된다.
+  const bypassGuard =
+    process.env.NODE_ENV !== "production" &&
+    (process.env["LEADOPS_DEV_LOGIN"] === "1" ||
+      process.env["NEXT_PUBLIC_LEADOPS_DATA_SOURCE"] === "fixture");
 
   // ❗ setAll 이 모은 쿠키(리프레시 회전분)와 캐시 헤더는 **어떤 응답으로 나가든** 실려야
   //    한다. 리다이렉트에서 빠뜨리면 회전된 리프레시 토큰이 유실돼 조용히 로그아웃된다.
@@ -61,7 +65,7 @@ export async function middleware(request: NextRequest) {
     return res;
   };
 
-  if (!hasSession && !devLogin && !isPublic) {
+  if (!hasSession && !bypassGuard && !isPublic) {
     return withAuthCookies(NextResponse.redirect(new URL("/login", request.url)));
   }
   if (hasSession && pathname === "/login") {

@@ -34,6 +34,13 @@ export async function POST(req: Request): Promise<Response> {
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
+    // 자격 증명 오류가 아닌 것(레이트리밋·업스트림 장애)은 구분해 알린다 —
+    // "비밀번호 오류" 로 위장하면 운영 진단이 불가능하다. 계정 탐색 방지는 4xx 자격 오류에만 적용.
+    if (error.status === 429 || (error.status !== undefined && error.status >= 500)) {
+      return json(502, {
+        error: { code: "auth_upstream_error", message: "인증 서버가 응답하지 않습니다. 잠시 후 다시 시도하세요." },
+      });
+    }
     // 계정 존재 여부를 구분해 주지 않는다 — 계정 탐색(enumeration)을 막는다.
     return json(401, {
       error: { code: "invalid_credentials", message: "이메일 또는 비밀번호가 올바르지 않습니다." },

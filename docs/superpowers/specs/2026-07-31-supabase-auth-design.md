@@ -58,7 +58,7 @@ sessionToken() (token.ts 개편 · async 로 변경)
 | 파일 | 내용 |
 |---|---|
 | `package.json` | `@supabase/ssr` · `@supabase/supabase-js` 추가 (서버 코드에서만 import) |
-| `src/lib/server/supabase.ts` (신설) | httpOnly 쿠키 어댑터를 쓰는 `createServerClient` 팩토리 — route handler·middleware 공용 |
+| `src/lib/server/supabase.ts` (신설) | httpOnly 쿠키 어댑터를 쓰는 `createServerClient` 팩토리 — route handler 용 (middleware 는 next/headers 불가라 자체 쿠키 어댑터) |
 | `src/lib/server/token.ts` | `sessionToken()` async 개편 (우선순위 위 참조) · "삭제한다" 주석을 유지 결정으로 갱신 |
 | `src/app/api/auth/login/route.ts` (신설) | POST 로그인 |
 | `src/app/api/auth/logout/route.ts` (신설) | POST 로그아웃 |
