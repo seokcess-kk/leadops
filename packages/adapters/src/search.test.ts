@@ -13,7 +13,13 @@ const localItem = (over: Record<string, unknown> = {}): Record<string, unknown> 
   mapy: "375000000",
   ...over,
 });
-import { MAX_DISPLAY, parseHitDate, parseNaverResponse, stripHighlight } from "./search";
+import {
+  MAX_DISPLAY,
+  naverLegacySunsetWarning,
+  parseHitDate,
+  parseNaverResponse,
+  stripHighlight,
+} from "./search";
 
 /**
  * 네이버 검색 응답 해석.
@@ -123,6 +129,20 @@ describe("HTML 엔티티", () => {
   it("문자열이 아니면 빈 문자열이다", () => {
     expect(stripHighlight(undefined)).toBe("");
     expect(stripHighlight(123)).toBe("");
+  });
+});
+
+describe("naverLegacySunsetWarning", () => {
+  it("종료 90일 전까지는 조용하다", () => {
+    expect(naverLegacySunsetWarning(new Date("2026-08-01T00:00:00Z"))).toBeNull();
+  });
+  it("90일 안으로 들어오면 남은 일수를 경고한다", () => {
+    const msg = naverLegacySunsetWarning(new Date("2027-05-01T00:00:00Z"));
+    expect(msg).toContain("apihub");
+    expect(msg).toMatch(/\d+일/);
+  });
+  it("종료 후에는 실패를 예고한다", () => {
+    expect(naverLegacySunsetWarning(new Date("2027-07-02T00:00:00Z"))).toContain("종료됐습니다");
   });
 });
 

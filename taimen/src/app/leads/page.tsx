@@ -7,6 +7,7 @@ import { Notice } from "@/components/ui/Notice";
 import { StatusTag } from "@/components/ui/StatusTag";
 import { api, ApiError, type ApiExportRow } from "@/lib/data/client";
 import { downloadCsv, toCsv, type CsvColumn } from "@/lib/data/csv";
+import { kstDate } from "@/lib/data/format";
 import { seoulToday, useReview } from "@/lib/data/store";
 import {
   INDUSTRY_LABEL,
@@ -33,7 +34,7 @@ const EXPORT_COLUMNS: ReadonlyArray<CsvColumn<ApiExportRow>> = [
 function daysAgo(days: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(d);
+  return kstDate(d);
 }
 
 /**

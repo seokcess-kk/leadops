@@ -29,6 +29,8 @@ test.describe.configure({ mode: "serial" });
 
 test("검수 목록이 실데이터를 읽는다", async ({ page }) => {
   const row = await gotoTodayWith(page, NAMES.happyPath);
+  // 사이드바가 /api/me 의 실제 로그인 사용자를 보여준다 (하드코딩·가짜 이름 금지 규칙)
+  await expect(page.getByText("e2e-reviewer@example.kr")).toBeVisible();
   await expect(row).toContainText("치과");
   // 이메일이 없으면 행의 승인 버튼은 눌릴 수 없다 (MX 통과 이메일이 승인의 전제다).
   await expect(row.getByRole("button", { name: "승인" })).toBeDisabled();

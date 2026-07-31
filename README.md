@@ -30,7 +30,7 @@ pnpm install
 cp .env.example .env      # 목업 모드로 바로 동작한다
 
 pnpm db:up                # 테스트용 Postgres 17 컨테이너 (Docker 필요)
-pnpm verify               # typecheck + 633 단위 + 242 DB 테스트
+pnpm verify               # typecheck + 720 단위 + 312 DB 테스트
 
 pnpm spike universe       # 모집단 크기(M0)와 소진 곡선
 ```
@@ -733,7 +733,7 @@ pnpm spike measure --goldset out/sample-seed42.csv
 
 | 잡 | 무엇을 | 왜 별도 잡인가 |
 |---|---|---|
-| `verify` | 루트 typecheck · 단위 649 · DB 통합 287 | Postgres 17 서비스 컨테이너를 **55432** 로 매핑한다 (`testDb.ts` 의 기본 DSN 과 맞춰 CI 전용 환경변수를 없앴다) |
+| `verify` | 루트 typecheck · 단위 720 · DB 통합 312 | Postgres 17 서비스 컨테이너를 **55432** 로 매핑한다 (`testDb.ts` 의 기본 DSN 과 맞춰 CI 전용 환경변수를 없앴다) |
 | `taimen` | taimen typecheck | taimen 은 **상위 워크스페이스에 속하지 않는다** — 루트 install 로는 UI 의존성이 깔리지 않는다 |
 | `e2e` | Playwright 13건 | 브라우저 바이너리 캐시 · 루트+taimen 양쪽 install 필요 · 실패 시 trace 를 아티팩트로 올린다 |
 | `restore-rehearsal` | 백업·복구 리허설 | 스키마·RLS·GRANT 를 바꾸는 PR 이 **복원 가능성**을 깨뜨리지 않았는지 매번 본다 |

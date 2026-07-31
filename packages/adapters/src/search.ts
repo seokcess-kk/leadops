@@ -107,6 +107,20 @@ export interface NaverSearchOptions {
 
 const LEGACY_BASE = "https://openapi.naver.com/v1/search";
 
+/** 약관 부칙(2026-07-31 시행): 기존 이용자의 legacy Search API 종료 시점 (2027-06-30 24:00 KST). */
+export const NAVER_LEGACY_SUNSET = new Date("2027-06-30T15:00:00Z");
+
+/** 종료 90일 전부터 경고문을 돌려준다. 그 전엔 null. 워커 부팅이 이것을 warn 으로 남긴다. */
+export function naverLegacySunsetWarning(now: Date): string | null {
+  const msLeft = NAVER_LEGACY_SUNSET.getTime() - now.getTime();
+  const daysLeft = Math.ceil(msLeft / 86_400_000);
+  if (daysLeft > 90) return null;
+  if (daysLeft > 0) {
+    return `네이버 legacy Search API 종료까지 ${daysLeft}일 — variant: "apihub" 이관이 필요합니다 (docs/legal/naver-terms-2026-07-31.md 부칙)`;
+  }
+  return `네이버 legacy Search API 가 종료됐습니다 (2027-06-30) — variant: "apihub" 이관 전까지 검색 호출이 실패합니다`;
+}
+
 export class NaverSearchAdapter implements SearchAdapter {
   readonly sourceName = "naver_search";
   /** ✅ 실 API 응답으로 검증됨 (2026-07-31 · `pnpm spike verify` — fixture 회귀 테스트 있음). */
