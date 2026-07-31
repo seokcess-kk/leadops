@@ -21,6 +21,23 @@ import { Worker } from "./loop";
 let db: TestDb;
 const adapters = [new MockSourceAdapter()];
 
+/**
+ * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트를 실제로 실행하는
+ * 시각 기준이므로, 고정 절대 날짜는 달력에 따라 창 밖으로 밀려나 관측 insert 가
+ * "no partition of relation found for row" 로 깨진다 — packages/db/src/fixtures.ts 의
+ * `createRun` 동적 기본값과 같은 이유다. 서로 다른 오프셋을 쓰는 것은 각 run 을
+ * 구분하기 위함일 뿐 절대 날짜 값 자체에는 의미가 없다.
+ */
+function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
+const RUN_DATE_MAIN = relativeDate(0);
+const RUN_DATE_IDEMPOTENT = relativeDate(1);
+const RUN_DATE_FAILURE = relativeDate(2);
+
 /** 외부로 나가지 않게 loopback 으로 묶는다. 그쪽은 아무도 듣고 있지 않다. */
 const resolver: DnsResolver = async () => [{ address: "127.0.0.1", family: 4 }];
 
@@ -65,7 +82,7 @@ describe("전체 파이프라인 — 13개 스테이지", () => {
   it("❗ 실행을 만들고 큐를 비우면 업체가 적재된다", async () => {
     const { runId, attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
-      runDate: "2026-12-01",
+      runDate: RUN_DATE_MAIN,
       industries: ["derm", "dental"],
       perIndustryLimit: 30,
       logger: nullLogger,
@@ -98,7 +115,7 @@ describe("전체 파이프라인 — 13개 스테이지", () => {
       from run_stages s
       join run_attempts a on a.id = s.attempt_id
       join runs r on r.id = a.run_id
-      where r.run_date = '2026-12-01'::date
+      where r.run_date = ${RUN_DATE_MAIN}::date
       order by s.stage
     `;
     const byStage = new Map(rows.map((r) => [r.stage, r]));
@@ -142,7 +159,7 @@ describe("전체 파이프라인 — 13개 스테이지", () => {
     expect(row!.n).toBe("0");
 
     const [run] = await db.owner<Array<{ status: string }>>`
-      select status from runs where run_date = '2026-12-01'::date
+      select status from runs where run_date = ${RUN_DATE_MAIN}::date
     `;
     expect(run!.status).toBe("succeeded");
   });
@@ -209,7 +226,7 @@ describe("❗ 멱등성 — 재실행해도 결과가 같다", () => {
   it("같은 attempt 를 다시 처리해도 업체가 늘어나지 않는다", async () => {
     const { attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
-      runDate: "2026-12-02",
+      runDate: RUN_DATE_IDEMPOTENT,
       industries: ["plastic"],
       perIndustryLimit: 10,
       logger: nullLogger,
@@ -267,7 +284,7 @@ describe("❗ 실패 처리", () => {
   it("스테이지가 실패하면 잡이 재시도되고, 소진하면 run 이 failed 가 된다", async () => {
     const { runId, attemptId } = await startRun(db.workerSql, {
       trigger: "manual",
-      runDate: "2026-12-03",
+      runDate: RUN_DATE_FAILURE,
       industries: ["derm"],
       perIndustryLimit: 5,
       logger: nullLogger,

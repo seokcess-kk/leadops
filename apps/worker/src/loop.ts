@@ -162,8 +162,10 @@ export class Worker {
     const handler = stageByName(job.stage);
     const attemptId = await this.#attemptIdOf(job.job_id);
 
-    const [row] = await this.#sql<Array<{ run_id: string; settings_snapshot: Record<string, unknown> }>>`
-      select r.id as run_id, r.settings_snapshot
+    const [row] = await this.#sql<
+      Array<{ run_id: string; run_date: string; settings_snapshot: Record<string, unknown> }>
+    >`
+      select r.id as run_id, r.run_date::text as run_date, r.settings_snapshot
       from run_attempts a join runs r on r.id = a.run_id
       where a.id = ${attemptId}
     `;
@@ -172,6 +174,7 @@ export class Worker {
     const ctx: StageContext = {
       sql: this.#sql,
       runId: row.run_id,
+      runDate: row.run_date,
       attemptId,
       settings: row.settings_snapshot,
       logger: log,

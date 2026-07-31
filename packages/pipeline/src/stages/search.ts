@@ -218,16 +218,16 @@ async function persistAggregates(
     for (const aggregate of aggregates) {
       const [row] = await tx<Array<{ id: string }>>`
         insert into search_aggregates (
-          attempt_id, company_id, keyword, keyword_kind, provider,
+          attempt_id, company_id, run_date, keyword, keyword_kind, provider,
           total_returned, denominator, related_count, official_count,
           recency_dist, all_url_hashes, classifier_version, ors
         ) values (
-          ${ctx.attemptId}, ${companyId}, ${keyword}, ${keywordKind}, ${aggregate.provider},
+          ${ctx.attemptId}, ${companyId}, ${ctx.runDate}::date, ${keyword}, ${keywordKind}, ${aggregate.provider},
           ${aggregate.totalReturned}, ${aggregate.denominator}, ${aggregate.relatedCount},
           ${aggregate.officialCount}, ${tx.json(aggregate.recencyDist)},
           ${aggregate.hits.map((h) => h.urlHash)}, ${CLASSIFIER_VERSION}, ${aggregate.ors}
         )
-        on conflict (attempt_id, company_id, keyword, provider) do update set
+        on conflict (attempt_id, company_id, keyword, provider, run_date) do update set
           total_returned = excluded.total_returned,
           denominator = excluded.denominator,
           related_count = excluded.related_count,
@@ -246,10 +246,10 @@ async function persistAggregates(
         if (hitsByHash.get(hit.urlHash) !== hit) continue;
         await tx`
           insert into search_hits (
-            aggregate_id, attempt_id, company_id, keyword, rank, channel_type,
+            aggregate_id, run_date, attempt_id, company_id, keyword, rank, channel_type,
             is_official, url, url_hash, title, published_at, recency
           ) values (
-            ${aggregateId}, ${ctx.attemptId}, ${companyId}, ${keyword}, ${hit.rank},
+            ${aggregateId}, ${ctx.runDate}::date, ${ctx.attemptId}, ${companyId}, ${keyword}, ${hit.rank},
             ${hit.channelType}::channel_type, ${hit.isOfficial}, ${hit.url}, ${hit.urlHash},
             ${hit.title}, ${hit.publishedAt ? hit.publishedAt.toISOString().slice(0, 10) : null}::date,
             ${hit.recency}::recency_bucket

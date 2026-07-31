@@ -20,9 +20,11 @@ export interface Candidate {
  */
 export async function createRun(
   db: TestDb,
-  runDate = "2026-07-29",
+  // ❗ 고정 날짜를 쓰지 않는다. 파티션은 현재 달 기준으로 만들어지므로 고정 날짜는
+  //    시간이 지나면 파티션 밖(또는 만료 대상)이 되어 테스트가 달력에 따라 깨진다.
+  runDate = new Date().toISOString().slice(0, 10),
   trigger = "manual",
-): Promise<{ runId: string; attemptId: string }> {
+): Promise<{ runId: string; attemptId: string; runDate: string }> {
   const [run] = await db.owner<{ id: string }[]>`
     insert into runs (run_date, trigger, settings_snapshot)
     values (${runDate}::date, ${trigger}, public.snapshot_settings())
@@ -32,7 +34,7 @@ export async function createRun(
   const [attempt] = await db.owner<{ id: string }[]>`
     insert into run_attempts (run_id, attempt_no) values (${runId}, 1) returning id
   `;
-  return { runId, attemptId: attempt!.id };
+  return { runId, attemptId: attempt!.id, runDate };
 }
 
 export interface CandidateOptions {

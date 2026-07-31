@@ -159,10 +159,9 @@ select jsonb_pretty(public.capacity_report());   -- 테이블별 크기 (admin)
 4. **180일 시점의 self-host 이전은 기정사실이다** (설계서 4.2). Supabase Pro($25/월)로
    가면 예산의 절반이 사라지므로 워커 VPS 위 Postgres 로 옮긴다.
 
-> ⚠️ 설계서 4.2 는 `search_aggregates`·관측 테이블의 **월 단위 파티션 + 365일 초과 detach** 도
-> 요구한다. **아직 구현하지 않았다** — 기존 테이블을 파티션 테이블로 바꾸는 것은 데이터
-> 이관이 필요한 별도 작업이다. 현재는 `cleanup_by_capacity()` 의 DELETE 로 버틴다.
-> 행이 수천만 건이 되면 DELETE 로는 부족해지므로, 그 전에 파티셔닝을 해야 한다.
+파티션 유지는 `maintain_observation_partitions()` 가 한다 — `cleanup_by_capacity()`(워커
+cleanup·pg_cron)와 `startRun` 양쪽에서 불린다. +2개월 선생성, 365일 초과 파티션은
+detach 후 즉시 drop (백업은 pg_dump 리허설 체계가 담당한다).
 
 ---
 

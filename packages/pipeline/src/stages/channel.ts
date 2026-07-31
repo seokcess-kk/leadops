@@ -167,16 +167,16 @@ function looksLikeFeed(body: string): boolean {
 async function persist(ctx: FetchingStageContext, target: Target, metrics: ActivityMetrics): Promise<void> {
   await ctx.sql`
     insert into channel_observations (
-      channel_id, attempt_id, is_active, last_post_at, posts_60d, posts_120d,
+      channel_id, attempt_id, run_date, is_active, last_post_at, posts_60d, posts_120d,
       cadence_days, content_mix, analyzable, unavailable_reason, feed_saturated
     ) values (
-      ${target.channel_id}, ${ctx.attemptId}, ${isActive(metrics)},
+      ${target.channel_id}, ${ctx.attemptId}, ${ctx.runDate}::date, ${isActive(metrics)},
       ${metrics.lastPostAt ?? null}::date, ${metrics.analyzable ? metrics.posts60d : null},
       ${metrics.analyzable ? metrics.posts120d : null}, ${metrics.cadenceDays ?? null},
       ${ctx.sql.json(metrics.contentMix)}, ${metrics.analyzable},
       ${metrics.unavailableReason ?? null}, ${metrics.saturated}
     )
-    on conflict (channel_id, attempt_id) do update set
+    on conflict (channel_id, attempt_id, run_date) do update set
       is_active = excluded.is_active,
       last_post_at = excluded.last_post_at,
       posts_60d = excluded.posts_60d,

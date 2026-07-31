@@ -18,6 +18,17 @@ import type { StageContext } from "./types";
 
 let db: TestDb;
 
+/**
+ * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
+ * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
+ * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
+ */
+function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
 const RSS = (dates: readonly string[]): string =>
   `<?xml version="1.0"?><rss version="2.0"><channel><title>공식블로그</title>${dates
     .map((d, i) => `<item><title>글 ${i} 이벤트</title><pubDate>${d}</pubDate></item>`)
@@ -122,12 +133,14 @@ describe("❗ 쿼터 가드 — 호출 전에 선점한다", () => {
 describe("channel_analyze — 공식 채널 활성도", () => {
   let runId: string;
   let attemptId: string;
+  let runDate: string;
   const ids: Record<string, string> = {};
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-10-10");
+    const run = await createRun(db, relativeDate(1));
     runId = run.runId;
     attemptId = run.attemptId;
+    runDate = run.runDate;
 
     const seed = async (name: string, channels: Array<[string, string]>): Promise<string> => {
       const suffix = Math.random().toString(36).slice(2, 10);
@@ -136,8 +149,8 @@ describe("channel_analyze — 공식 채널 활성도", () => {
         values (${`dk-${suffix}`}, ${name}, ${name}, 'derm') returning id
       `;
       await db.owner`
-        insert into company_observations (company_id, attempt_id, status, track)
-        values (${company!.id}, ${attemptId}, 'active', 'new')
+        insert into company_observations (company_id, attempt_id, run_date, status, track)
+        values (${company!.id}, ${attemptId}, ${runDate}::date, 'active', 'new')
       `;
       for (const [type, url] of channels) {
         const [ch] = await db.owner<{ id: string }[]>`
@@ -164,7 +177,7 @@ describe("channel_analyze — 공식 채널 활성도", () => {
     });
 
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings: {}, logger: nullLogger, adapters: [],
+      sql: db.owner, runId, attemptId, runDate, settings: {}, logger: nullLogger, adapters: [],
       http, robots: new RobotsGate({ client: http, userAgentToken: "leadopsbot", logger: nullLogger }),
     };
     await channelStage.run(ctx, {});
@@ -207,7 +220,7 @@ describe("channel_analyze — 공식 채널 활성도", () => {
   it("공식 채널이 없는 업체를 조용히 넘기지 않는다", async () => {
     const { http } = fakeHttp(() => ({ body: "" }));
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings: {}, logger: nullLogger, adapters: [],
+      sql: db.owner, runId, attemptId, runDate, settings: {}, logger: nullLogger, adapters: [],
       http, robots: new RobotsGate({ client: http, userAgentToken: "leadopsbot", logger: nullLogger }),
     };
     const result = await channelStage.run(ctx, {});
@@ -223,7 +236,7 @@ describe("channel_analyze — 공식 채널 활성도", () => {
 
   it("HttpClient 없이 실행하면 configuration_error 다", async () => {
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings: {}, logger: nullLogger, adapters: [],
+      sql: db.owner, runId, attemptId, runDate, settings: {}, logger: nullLogger, adapters: [],
     };
     await expect(channelStage.run(ctx, {})).rejects.toThrow(/HttpClient/);
   });
@@ -234,31 +247,31 @@ describe("channel_analyze — 공식 채널 활성도", () => {
 describe("search_analyze — ORS", () => {
   const settings = { quota: { naver_daily_cap: 20000, data_go_kr_daily_cap: 9000, youtube_daily_units: 9000 } };
 
-  async function seedOfficial(attemptId: string, name: string): Promise<string> {
+  async function seedOfficial(attemptId: string, runDate: string, name: string): Promise<string> {
     const suffix = Math.random().toString(36).slice(2, 10);
     const [company] = await db.owner<{ id: string }[]>`
       insert into companies (dedupe_key, name, normalized_name, industry, region_sigungu)
       values (${`dk-${suffix}`}, ${name}, ${name}, 'derm', '강남구') returning id
     `;
     await db.owner`
-      insert into company_observations (company_id, attempt_id, status, track)
-      values (${company!.id}, ${attemptId}, 'active', 'new')
+      insert into company_observations (company_id, attempt_id, run_date, status, track)
+      values (${company!.id}, ${attemptId}, ${runDate}::date, 'active', 'new')
     `;
     const [site] = await db.owner<{ id: string }[]>`
       insert into websites (company_id, canonical_url, domain)
       values (${company!.id}, ${`https://${suffix}.kr`}, ${`${suffix}.kr`}) returning id
     `;
     await db.owner`
-      insert into website_observations (website_id, attempt_id, official_status, official_score)
-      values (${site!.id}, ${attemptId}, 'confirmed', 80)
+      insert into website_observations (website_id, attempt_id, run_date, official_status, official_score)
+      values (${site!.id}, ${attemptId}, ${runDate}::date, 'confirmed', 80)
     `;
     return company!.id;
   }
 
   it("❗ 검색 어댑터가 없으면 실패가 아니라 건너뛴다 (축소 파이프라인)", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-10-20");
+    const { runId, attemptId, runDate } = await createRun(db, "2026-10-20");
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings, logger: nullLogger, adapters: [],
+      sql: db.owner, runId, attemptId, runDate, settings, logger: nullLogger, adapters: [],
     };
     const result = await searchStage.run(ctx, {});
     expect(result.skipped["ors_disabled"]).toBe(1);
@@ -266,12 +279,12 @@ describe("search_analyze — ORS", () => {
   });
 
   it("업체별 4채널을 집계하고 키워드를 저장한다", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-10-21");
-    const companyId = await seedOfficial(attemptId, "라온피부과의원");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(2));
+    const companyId = await seedOfficial(attemptId, runDate, "라온피부과의원");
     const adapter = new MockSearchAdapter();
 
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings, logger: nullLogger, adapters: [], search: adapter,
+      sql: db.owner, runId, attemptId, runDate, settings, logger: nullLogger, adapters: [], search: adapter,
     };
     const result = await searchStage.run(ctx, {});
     expect(result.passed).toBe(1);
@@ -328,14 +341,14 @@ describe("search_analyze — ORS", () => {
   });
 
   it("❗ 쿼터가 소진되면 그 자리에서 멈춘다", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-10-22");
-    await seedOfficial(attemptId, "쿼터소진의원");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(3));
+    await seedOfficial(attemptId, runDate, "쿼터소진의원");
     const adapter = new MockSearchAdapter();
     // 쿼터는 provider 단위 · 하루 단위다. 앞 테스트가 이미 쓴 몫을 비워 의도를 분명히 한다.
     await db.owner`delete from cost_ledger where provider = 'naver_search'`;
 
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId,
+      sql: db.owner, runId, attemptId, runDate,
       // 호출 2회분만 허용한다.
       settings: { quota: { naver_daily_cap: 2, data_go_kr_daily_cap: 1, youtube_daily_units: 1 } },
       logger: nullLogger, adapters: [], search: adapter,
