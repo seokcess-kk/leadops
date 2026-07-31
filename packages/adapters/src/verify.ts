@@ -5,6 +5,7 @@ import type { HttpClient } from "@leadops/http";
 import { encodeServiceKey } from "./dataGoKr";
 import { HIRA_CODES, HIRA_DGSBJT_NAMES, NAME_KEYWORD, type HiraHospitalItem } from "./hira";
 import type { FtcBrandItem } from "./ftc";
+import { ORS_CHANNELS, parseNaverResponse } from "./search";
 
 /**
  * 어댑터 실 API 검증.
@@ -48,6 +49,8 @@ export interface VerifyOptions {
   logger: Logger;
   /** 실제 응답을 저장할 디렉터리. 지정하지 않으면 녹화하지 않는다. */
   fixtureDir?: string;
+  /** 네이버 검증용 자격증명. 없으면 verifyNaver 는 skip 을 돌려준다 (fail 아님). */
+  naver?: { clientId: string; clientSecret: string };
 }
 
 // ── 엔드포인트 후보 ──────────────────────────────────────────────────────────
@@ -739,8 +742,91 @@ function worstStatus(checks: readonly CheckResult[]): CheckStatus {
   return "pass";
 }
 
+// ── 네이버 검색 ──────────────────────────────────────────────────────────────
+
+const NAVER_VERIFY_KEYWORD = "강남 피부과";
+const NAVER_BASE = "https://openapi.naver.com/v1/search";
+
+/**
+ * 네이버 응답은 items 가 최상위에 있다 (data.go.kr 봉투와 다름).
+ * 회귀에 필요한 만큼만 남긴다 — total 은 검증 결과 자체이므로 자르지 않는다.
+ */
+function recordNaverFixture(dir: string | undefined, name: string, body: string): string | undefined {
+  if (!dir) return undefined;
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}.json`);
+  let out = body;
+  try {
+    const doc = JSON.parse(body) as Record<string, any>;
+    if (Array.isArray(doc?.["items"])) {
+      doc["items"] = doc["items"].slice(0, FIXTURE_ITEMS);
+      doc["display"] = Math.min(FIXTURE_ITEMS, doc["items"].length);
+      out = `${JSON.stringify(doc, null, 2)}\n`;
+    }
+  } catch {
+    // JSON 이 아니면 원문 그대로 — 형태를 모르는 응답일수록 원본이 중요하다.
+  }
+  writeFileSync(path, out, "utf8");
+  return path;
+}
+
+/**
+ * 네이버 검색 어댑터 검증 (설계서 11장 · D-002).
+ *
+ * ❗ 자격증명이 없으면 **skip** 이다. 검색 어댑터는 선택적이고 축소 파이프라인이
+ *    1급 경로이므로, 키가 없는 환경(CI)에서 fail 을 내면 안 된다.
+ */
+export async function verifyNaver(options: VerifyOptions): Promise<AdapterVerification> {
+  const { http, logger, fixtureDir, naver } = options;
+  const checks: CheckResult[] = [];
+
+  if (!naver?.clientId || !naver?.clientSecret) {
+    checks.push({
+      name: "자격증명",
+      status: "skip",
+      detail:
+        "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없어 건너뜁니다. " +
+        "검색 어댑터는 선택적입니다 (축소 파이프라인이 1급 경로).",
+    });
+    return { adapter: "naver_search", checks, status: "skip" };
+  }
+
+  for (const channel of ORS_CHANNELS) {
+    const url = new URL(`${NAVER_BASE}/${channel}.json`);
+    url.searchParams.set("query", NAVER_VERIFY_KEYWORD);
+    url.searchParams.set("display", "5");
+    try {
+      const res = await http.get(url.href, {
+        headers: {
+          "X-Naver-Client-Id": naver.clientId,
+          "X-Naver-Client-Secret": naver.clientSecret,
+        },
+        acceptContentTypes: ["application/json", "text/json"],
+      });
+      // 파서가 실응답을 해석하는지가 검증의 본체다 — 여기서 던지면 fail 로 기록된다.
+      const result = parseNaverResponse(channel, NAVER_VERIFY_KEYWORD, res.body);
+      const fixture = recordNaverFixture(fixtureDir, `naver-search-${channel}`, res.body);
+      checks.push({
+        name: `${channel} 응답·파싱`,
+        status: "pass",
+        detail: `total ${result.total} · hits ${result.hits.length} — 파서가 실응답을 해석했습니다.`,
+        ...(fixture ? { evidence: `fixture: ${fixture}` } : {}),
+      });
+      logger.info("verify.naver", { channel, total: result.total, hits: result.hits.length });
+    } catch (err) {
+      checks.push({
+        name: `${channel} 응답·파싱`,
+        status: "fail",
+        detail: err instanceof LeadOpsError ? `${err.code}: ${err.message}` : String(err),
+      });
+    }
+  }
+
+  return { adapter: "naver_search", checks, status: worstStatus(checks) };
+}
+
 export async function verifyAdapters(options: VerifyOptions): Promise<AdapterVerification[]> {
-  return [await verifyHira(options), await verifyFtc(options)];
+  return [await verifyHira(options), await verifyFtc(options), await verifyNaver(options)];
 }
 
 /** 리포트를 사람이 읽을 형태로. */

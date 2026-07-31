@@ -118,6 +118,9 @@ async function main(): Promise<number> {
         serviceKey: env.DATA_GO_KR_SERVICE_KEY,
         logger,
         ...(flagBool(args, "no-record") ? {} : { fixtureDir: flagString(args, "fixtures") ?? "fixtures/http" }),
+        ...(env.NAVER_CLIENT_ID && env.NAVER_CLIENT_SECRET
+          ? { naver: { clientId: env.NAVER_CLIENT_ID, clientSecret: env.NAVER_CLIENT_SECRET } }
+          : {}),
       });
       process.stdout.write(formatVerification(results) + "\n");
       return results.some((r) => r.status === "fail") ? 1 : 0;
