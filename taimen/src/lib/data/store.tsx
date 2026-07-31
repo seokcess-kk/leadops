@@ -259,7 +259,7 @@ async function loadOps(): Promise<OpsSnapshot> {
     rejectedToday:
       rejectedRows === null
         ? null
-        : rejectedRows.filter((r) => r.decided_at !== null && seoulDate(r.decided_at) === today).length,
+        : rejectedRows.filter((r) => r.decided_at !== null && kstDate(r.decided_at) === today).length,
     costsForbidden: costs.forbidden,
   };
 }
