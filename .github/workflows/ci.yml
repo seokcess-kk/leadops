@@ -231,16 +231,21 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # ❗ `docker exec pg_isready` 로는 부족하다 — initdb 의 임시 서버(유닉스 소켓 전용)가
+      #    떠 있는 동안에도 ready 를 답하고, 그 직후 본 서버가 기동하는 틈의 TCP 연결은
+      #    "the database system is starting up" 으로 거절된다 (verify 잡의 주석과 같은 함정.
+      #    실제로 이 잡이 그 틈을 밟아 마이그레이션이 죽었다). 마이그레이션이 실제로 쓸
+      #    경로(TCP · leadops DB)로 **질의**해서 확인한다.
       - name: Postgres 기동
         run: |
           pnpm db:up
           for _ in $(seq 1 30); do
-            if docker exec leadops-pg pg_isready -U postgres >/dev/null 2>&1; then
+            if PGPASSWORD=leadops psql -h 127.0.0.1 -p 55432 -U postgres -d leadops -c 'select 1' >/dev/null 2>&1; then
               echo "postgres ready"; exit 0
             fi
             sleep 2
           done
-          echo "postgres 가 기동하지 않았습니다" >&2
+          echo "postgres 가 질의를 받지 못했습니다" >&2
           docker logs leadops-pg >&2
           exit 1
 
