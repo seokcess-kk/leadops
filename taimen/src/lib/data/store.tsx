@@ -50,6 +50,11 @@ export interface OpsSnapshot {
   /** 오늘 누적 비용. admin 이 아니면 `null` 이고 `costsForbidden` 이 true 다. */
   todayKrw: number | null;
   naverQuotaPct: number | null;
+  /** 오늘 run 의 `counts` 스냅샷. 오늘 실행이 없으면 `null`. */
+  todayRawCandidates: number | null;
+  todayAnalyzed: number | null;
+  /** `decided_at` 이 오늘(KST)인 제외 건수. 목록 limit 초과 시 하한값. */
+  rejectedToday: number | null;
   /** 비용·쿼터를 볼 권한이 없다 (admin 전용). "0 원" 과 구분해야 한다. */
   costsForbidden: boolean;
 }
@@ -60,6 +65,9 @@ const emptyOps: OpsSnapshot = {
   approvalCap: null,
   todayKrw: null,
   naverQuotaPct: null,
+  todayRawCandidates: null,
+  todayAnalyzed: null,
+  rejectedToday: null,
   costsForbidden: false,
 };
 
@@ -70,6 +78,9 @@ const fixtureOps: OpsSnapshot = {
   approvalCap: todayMetrics.approvalCap,
   todayKrw: todayMetrics.costKrw,
   naverQuotaPct: todayMetrics.naverQuotaPct,
+  todayRawCandidates: todayMetrics.rawCandidates,
+  todayAnalyzed: todayMetrics.analyzed,
+  rejectedToday: todayMetrics.rejected,
   costsForbidden: false,
 };
 
@@ -210,13 +221,14 @@ const finiteNumber = (value: unknown): number | null =>
  *    사라진다. 실패한 항목만 `null` 로 남기고 나머지는 살린다.
  */
 async function loadOps(): Promise<OpsSnapshot> {
-  const [settings, runs, costs] = await Promise.all([
+  const [settings, runs, costs, rejectedRows] = await Promise.all([
     api.settings().then((r) => r.data).catch(() => null),
     api.runs(1).then((r) => r.data).catch(() => null),
     api
       .costs()
       .then((r) => ({ data: r.data, forbidden: false }))
       .catch((err) => ({ data: null, forbidden: err instanceof ApiError && err.status === 403 })),
+    api.reviewList("rejected").then((r) => r.data).catch(() => null),
   ]);
 
   const latest = runs?.[0];
@@ -228,6 +240,12 @@ async function loadOps(): Promise<OpsSnapshot> {
         .reduce((sum, p) => sum + p.qty, 0)
     : null;
 
+  const today = seoulToday();
+  const seoulDate = (iso: string): string =>
+    new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date(iso));
+  // ❗ 오늘 run 의 counts 만 퍼널에 쓴다. 어제 실행의 수집량을 오늘 것처럼 보여 주지 않는다.
+  const todayCounts = latest && seoulDate(latest.run_date) === today ? latest.counts : {};
+
   return {
     latestRunId: latest?.id ?? null,
     latestRunStatus: latest?.status ?? null,
@@ -238,6 +256,12 @@ async function loadOps(): Promise<OpsSnapshot> {
       naverUsed !== null && naverCap !== null && naverCap > 0
         ? Math.round((naverUsed / naverCap) * 100)
         : null,
+    todayRawCandidates: finiteNumber(todayCounts["raw_candidates"]),
+    todayAnalyzed: finiteNumber(todayCounts["analyzed"]),
+    rejectedToday:
+      rejectedRows === null
+        ? null
+        : rejectedRows.filter((r) => r.decided_at !== null && seoulDate(r.decided_at) === today).length,
     costsForbidden: costs.forbidden,
   };
 }
@@ -441,14 +465,11 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     const approvedToday = state.leads.filter((lead) => lead.approvedAt === today).length;
 
     return {
-      // ⚠️ `runs.counts` 가 비어 있어(선언만 존재) 퍼널 상단의 출처가 없다. 0 이 아니라 모름이다.
-      rawCandidates: null,
-      analyzed: null,
+      rawCandidates: state.ops.todayRawCandidates,
+      analyzed: state.ops.todayAnalyzed,
       reviewQueue: pending,
       approved: approvedToday,
-      // ⚠️ `/api/review?status=rejected` 는 날짜 스코프가 없어 **누적값**이다. "오늘의 퍼널" 에
-      //    누적값을 넣으면 안 되므로 표시하지 않는다. 목록 응답에 `decided_at` 이 생기면 세운다.
-      rejected: null,
+      rejected: state.ops.rejectedToday,
       finalLeads: approvedToday,
       approvalCap: state.ops.approvalCap,
       costKrw: state.ops.todayKrw,

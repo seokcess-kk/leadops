@@ -107,6 +107,18 @@ describe("전체 파이프라인 — 13개 스테이지", () => {
 
     const [run] = await db.owner<{ status: string }[]>`select status from runs where id = ${runId}`;
     expect(run!.status).toBe("succeeded");
+
+    // ❗ 퍼널 스냅샷 (README "아직 없는 것" 해소) — collect·score terminal 시점에
+    //    runs.counts 가 실측으로 채워진다. raw_candidates 는 7일 보관이라 조회 시
+    //    집계로는 지난 실행이 영구 결손된다.
+    const [countsRow] = await db.owner<
+      Array<{ counts: { raw_candidates?: number; analyzed?: number } }>
+    >`
+      select counts from runs order by started_at desc nulls last limit 1
+    `;
+    expect(typeof countsRow!.counts.raw_candidates).toBe("number");
+    expect(countsRow!.counts.raw_candidates!).toBeGreaterThan(0);
+    expect(typeof countsRow!.counts.analyzed).toBe("number");
   });
 
   it("스테이지가 순서대로 terminal 이 된다", async () => {

@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic";
 
 /** 프록시가 통과시킬 경로. `:id` 자리는 세그먼트 하나를 뜻한다. */
 const ALLOWED: ReadonlyArray<{ method: string; pattern: readonly string[] }> = [
+  { method: "GET", pattern: ["api", "me"] },
   { method: "GET", pattern: ["api", "review"] },
   { method: "GET", pattern: ["api", "review", ":id"] },
   { method: "POST", pattern: ["api", "review", ":id", "contact-email"] },
