@@ -37,6 +37,7 @@ describe("마이그레이션", () => {
       "0012_ops_privacy_capacity.sql",
       "0013_fix_setting_paths.sql",
       "0014_homepage_discovery.sql",
+      "0015_partition_observations.sql",
     ]);
   });
 
