@@ -8,6 +8,7 @@ import { bearerToken, verifyJwt } from "./jwt";
 import { industryRoutes } from "./routes/industries";
 import { internalRoutes } from "./routes/internal";
 import { leadRoutes } from "./routes/leads";
+import { meRoutes } from "./routes/me";
 import { privacyRoutes } from "./routes/privacy";
 import { reviewRoutes } from "./routes/review";
 import { runRoutes } from "./routes/runs";
@@ -66,6 +67,7 @@ export function createApi(options: ApiOptions): Server {
   const routers: Router[] = [
     reviewRoutes({ session, resolver: options.resolver }),
     leadRoutes({ session }),
+    meRoutes({ session }),
     runRoutes({ session }),
     settingsRoutes({ session }),
     industryRoutes({ session }),

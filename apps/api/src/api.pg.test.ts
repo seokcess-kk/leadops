@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { nullLogger } from "@leadops/core";
-import { createCandidate, createTestDb, createUser, type Candidate, type TestDb } from "@leadops/db";
+import { createCandidate, createRun, createTestDb, createUser, type Candidate, type TestDb } from "@leadops/db";
 import type { MxResolver } from "@leadops/http";
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -1091,5 +1091,70 @@ describe("개인정보 워크플로 API", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.capacity.level).toBe("ok");
     expect(res.body.data.tables.length).toBeGreaterThan(10);
+  });
+});
+
+describe("UI 데이터 공백 — /api/me · decided_at · search_hits", () => {
+  it("GET /api/me 는 본인 프로필을 돌려준다", async () => {
+    const res = await call<{ data: { id: string; email: string; role: string } }>(
+      "GET", "/api/me", { token: tokenFor(userId) });
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBe(userId);
+    expect(res.body.data.email).toBe("reviewer@leadops.test");
+    expect(res.body.data.role).toBe("user");
+  });
+
+  it("admin 의 role 은 admin 이다", async () => {
+    const res = await call<{ data: { role: string } }>("GET", "/api/me", { token: tokenFor(adminId) });
+    expect(res.body.data.role).toBe("admin");
+  });
+
+  it("제외한 항목의 목록 행에 decided_at 이 있다", async () => {
+    const c = await createCandidate(db);
+    const decision = await call("POST", `/api/review/${c.reviewItemId}/decision`, {
+      token: tokenFor(userId),
+      body: { status: "rejected", reason: "테스트 제외" },
+    });
+    expect(decision.status).toBe(200);
+    const list = await call<{ data: Array<Record<string, unknown>> }>(
+      "GET", "/api/review?status=rejected&limit=200", { token: tokenFor(userId) });
+    const row = list.body.data.find((r) => r["id"] === c.reviewItemId);
+    expect(row).toBeDefined();
+    expect(row!["decided_at"]).toBeTruthy();
+  });
+
+  it("상세에 그 attempt 의 search_hits 가 rank 순으로 나온다 — 없으면 빈 배열", async () => {
+    const run = await createRun(db);
+    const c = await createCandidate(db, { runId: run.runId, attemptId: run.attemptId });
+    const [agg] = await db.owner<{ id: string }[]>`
+      insert into search_aggregates (
+        attempt_id, company_id, run_date, keyword, keyword_kind, provider,
+        total_returned, denominator, related_count, official_count, classifier_version)
+      values (${run.attemptId}, ${c.companyId}, ${run.runDate}::date, '테스트 키워드', 'nonbrand',
+        'naver_blog', 5, 5, 2, 1, 'v1')
+      returning id
+    `;
+    // rank 역순으로 넣어 응답 정렬을 검증한다
+    for (const rank of [2, 1]) {
+      await db.owner`
+        insert into search_hits (
+          aggregate_id, run_date, attempt_id, company_id, keyword, rank, channel_type,
+          is_official, url, url_hash, title, published_at, recency)
+        values (${agg!.id}, ${run.runDate}::date, ${run.attemptId}, ${c.companyId},
+          '테스트 키워드', ${rank}, 'thirdparty_blog', ${rank === 1},
+          ${`https://blog.example.kr/${rank}`}, ${`h${rank}-${c.companyId}`},
+          ${`글 ${rank}`}, '2026-07-01', 'd0_60')
+      `;
+    }
+    const res = await call<{ data: { search_hits: Array<Record<string, unknown>> } }>(
+      "GET", `/api/review/${c.reviewItemId}`, { token: tokenFor(userId) });
+    expect(res.status).toBe(200);
+    expect(res.body.data.search_hits.map((h) => h["rank"])).toEqual([1, 2]);
+    expect(res.body.data.search_hits[0]!["is_official"]).toBe(true);
+
+    const empty = await createCandidate(db);
+    const res2 = await call<{ data: { search_hits: unknown[] } }>(
+      "GET", `/api/review/${empty.reviewItemId}`, { token: tokenFor(userId) });
+    expect(res2.body.data.search_hits).toEqual([]);
   });
 });

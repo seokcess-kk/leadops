@@ -67,7 +67,7 @@ export function reviewRoutes(deps: ReviewDeps): Router {
     }
 
     const rows = await deps.session.asUser(ctx.userId, (tx) => tx<Row[]>`
-      select ri.id, ri.rank, ri.status, c.id as company_id, c.name, c.industry,
+      select ri.id, ri.rank, ri.status, ri.decided_at, c.id as company_id, c.name, c.industry,
              c.region_sido, c.region_sigungu,
              s.axis_problem::float8 as axis_problem, s.axis_propensity::float8 as axis_propensity,
              s.axis_confidence::float8 as axis_confidence, s.total::float8 as total,
@@ -99,7 +99,7 @@ export function reviewRoutes(deps: ReviewDeps): Router {
     const id = ctx.params["id"]!;
     return deps.session.asUser(ctx.userId, async (tx) => {
       const [item] = await tx<Row[]>`
-        select ri.id, ri.rank, ri.status, ri.note,
+        select ri.id, ri.rank, ri.status, ri.note, ri.attempt_id,
                c.id as company_id, c.name, c.industry, c.region_sido, c.region_sigungu,
                c.phone, c.size_tier, c.do_not_contact,
                s.id as score_id, s.axis_problem::float8 as axis_problem,
@@ -117,7 +117,7 @@ export function reviewRoutes(deps: ReviewDeps): Router {
       if (!item) throw badRequest("검수 항목을 찾을 수 없습니다");
 
       const companyId = item["company_id"] as string;
-      const [websites, contactPages, channels, ors, competitors, email] = await Promise.all([
+      const [websites, contactPages, channels, ors, competitors, email, searchHits] = await Promise.all([
         tx<Row[]>`
           select w.canonical_url, w.domain, wo.official_status, wo.official_score::float8 as official_score,
                  wo.signals, wo.has_contact_form_only
@@ -163,6 +163,15 @@ export function reviewRoutes(deps: ReviewDeps): Router {
           from emails where company_id = ${companyId} and acquisition_method = 'manual_entry'
           order by entered_at desc limit 1
         `,
+        // ❗ 이 검수 항목을 만든 attempt 의 관측만 — "최신 attempt" 로 하면 점수와
+        //    검색 결과의 출처 실행이 어긋난다. 30일 보관이 지나면 빈 배열이다.
+        tx<Row[]>`
+          select h.keyword, h.rank, h.channel_type, h.is_official, h.url, h.title,
+                 h.published_at, h.recency
+          from search_hits h
+          where h.attempt_id = ${item["attempt_id"] as string} and h.company_id = ${companyId}
+          order by h.keyword, h.rank
+        `,
       ]);
 
       // 검수 화면을 실제로 연 세션임을 증명할 1회용 nonce.
@@ -183,6 +192,7 @@ export function reviewRoutes(deps: ReviewDeps): Router {
           ors,
           competitors,
           email: email[0] ?? null,
+          search_hits: searchHits,
           nonce,
         },
       };
