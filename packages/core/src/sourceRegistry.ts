@@ -63,14 +63,16 @@ export const SOURCE_REGISTRY: Readonly<Record<string, SourceRegistryEntry>> = Ob
     legalBasis: "네이버 API 이용약관",
     allowedUse: "사내 리드 발굴 분석 (결과 원문 재배포 금지)",
     redistributionAllowed: false,
-    // D-002 (docs/03-decisions.md) — 발주자 판단으로 사용 승인.
-    // ❗ 약관 조항·API HUB 이관 여부는 Phase -1 확인 항목으로 남아 있음.
+    // D-002 (docs/03-decisions.md) — 발주자 승인. 2026-07-31 약관 전문 재확인 완료
+    // (docs/legal/naver-terms-2026-07-31.md · 7.3③ 저장·가공 제한, 특약 2.1, 8조).
+    // ❗ legacy 엔드포인트는 기존 이용자 지위로 **2027-06-30 까지** — 그 전에
+    //    API HUB(variant: "apihub") 이관 필요 (약관 부칙, 2026-07-31 시행).
     //    문제가 생기면 이 한 행을 approved:false 로 바꾸면 즉시 축소 파이프라인으로 폴백된다.
     approved: true,
     writtenApprovalRef: "D-002",
     reviewedBy: "발주자",
-    reviewedAt: "2026-07-29",
-    note: "약관 조항 문언 미검증. Phase -1 에서 전문 확인 필요.",
+    reviewedAt: "2026-07-31",
+    note: "약관 전문 확인 완료. legacy 기한 2027-06-30 — API HUB 이관 필요.",
   },
   youtube_data: {
     source: "youtube_data",
