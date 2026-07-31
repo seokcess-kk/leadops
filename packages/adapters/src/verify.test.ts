@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { LeadOpsError, nullLogger } from "@leadops/core";
 import type { HttpClient } from "@leadops/http";
 import { describe, expect, it } from "vitest";
-import { formatVerification, verifyFtc, verifyHira } from "./verify";
+import { formatVerification, verifyFtc, verifyHira, verifyNaver } from "./verify";
 
 /**
  * 검증 도구 자체의 테스트.
@@ -288,6 +288,21 @@ describe("verifyFtc", () => {
     const http = fakeHttp([{ match: /./, body: envelope([{ someOtherId: "x", someName: "y" }]) }]);
     const r = await verifyFtc({ ...baseOptions, http });
     expect(r.checks.find((c) => c.name === "필수 필드")!.status).toBe("fail");
+  });
+});
+
+describe("verifyNaver", () => {
+  it("자격증명이 없으면 fail 이 아니라 skip 이다 (검색 어댑터는 선택적)", async () => {
+    // skip 경로는 HTTP 를 만지지 않아야 한다 — 만지면 여기서 던져서 실패한다.
+    const http = new Proxy({} as HttpClient, {
+      get() {
+        throw new Error("skip 경로가 HTTP 를 호출했습니다");
+      },
+    });
+    const result = await verifyNaver({ http, serviceKey: "", logger: nullLogger });
+    expect(result.adapter).toBe("naver_search");
+    expect(result.status).toBe("skip");
+    expect(result.checks.some((c) => c.status === "fail")).toBe(false);
   });
 });
 

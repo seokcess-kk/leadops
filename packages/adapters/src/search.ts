@@ -109,8 +109,8 @@ const LEGACY_BASE = "https://openapi.naver.com/v1/search";
 
 export class NaverSearchAdapter implements SearchAdapter {
   readonly sourceName = "naver_search";
-  /** ⚠️ 실 API 응답으로 검증되지 않았다. 자격증명 확보 후 `pnpm spike verify` 로 확인한다. */
-  readonly verifiedAgainstLiveApi = false;
+  /** ✅ 실 API 응답으로 검증됨 (2026-07-31 · `pnpm spike verify` — fixture 회귀 테스트 있음). */
+  readonly verifiedAgainstLiveApi = true;
   readonly unitsPerCall = 1;
 
   readonly #id: string;

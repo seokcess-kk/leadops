@@ -38,6 +38,7 @@ describe("마이그레이션", () => {
       "0013_fix_setting_paths.sql",
       "0014_homepage_discovery.sql",
       "0015_partition_observations.sql",
+      "0016_naver_approval.sql",
     ]);
   });
 
@@ -45,6 +46,16 @@ describe("마이그레이션", () => {
     const { migrate } = await import("./migrate");
     const applied = await migrate(db.owner, { bootstrap: true });
     expect(applied).toEqual([]);
+  });
+
+  it("0016: 네이버 승인이 코드 레지스트리와 정합한다 (D-002 재확인 2026-07-31)", async () => {
+    const [row] = await db.owner<Array<{ approved: boolean; reviewed_at: string; note: string }>>`
+      select approved, reviewed_at::text as reviewed_at, note
+      from source_registry where source = 'naver_search'
+    `;
+    expect(row!.approved).toBe(true);
+    expect(row!.reviewed_at).toBe("2026-07-31");
+    expect(row!.note).toContain("2027-06-30");
   });
 
   it("설정 시드가 들어 있다", async () => {
