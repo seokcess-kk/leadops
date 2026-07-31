@@ -26,29 +26,41 @@ alter table search_hits alter column run_date set not null;
 
 -- 2-1. company_observations
 alter table company_observations rename to company_observations_old;
+alter table company_observations_old drop constraint if exists company_observations_pkey cascade;
+alter table company_observations_old drop constraint if exists company_observations_company_id_fkey cascade;
+alter table company_observations_old drop constraint if exists company_observations_attempt_id_fkey cascade;
+alter table company_observations_old drop constraint if exists company_observations_track_check cascade;
+alter table company_observations_old drop constraint if exists company_observations_company_id_attempt_id_run_date_key cascade;
 drop index if exists company_observations_cleanup;
 create table company_observations (
   id uuid not null default gen_random_uuid(),
-  company_id uuid not null references companies(id) on delete cascade,
-  attempt_id uuid not null references run_attempts(id) on delete cascade,
+  company_id uuid not null,
+  attempt_id uuid not null,
   run_date date not null,
   observed_at timestamptz not null default now(),
   status company_status not null,
   content_fingerprint text,
   change_detected boolean not null default false,
-  track text not null check (track in ('new', 'changed', 'unchanged', 'recontact')),
+  track text not null,
   summary jsonb not null default '{}'::jsonb,
-  primary key (id, run_date),
-  unique (company_id, attempt_id, run_date)
+  constraint company_observations_pkey primary key (id, run_date),
+  constraint company_observations_company_id_fkey foreign key (company_id) references companies(id) on delete cascade,
+  constraint company_observations_attempt_id_fkey foreign key (attempt_id) references run_attempts(id) on delete cascade,
+  constraint company_observations_track_check check (track in ('new', 'changed', 'unchanged', 'recontact')),
+  constraint company_observations_company_id_attempt_id_run_date_key unique (company_id, attempt_id, run_date)
 ) partition by range (run_date);
 create index company_observations_cleanup on company_observations (observed_at);
 
 -- 2-2. website_observations
 alter table website_observations rename to website_observations_old;
+alter table website_observations_old drop constraint if exists website_observations_pkey cascade;
+alter table website_observations_old drop constraint if exists website_observations_website_id_fkey cascade;
+alter table website_observations_old drop constraint if exists website_observations_attempt_id_fkey cascade;
+alter table website_observations_old drop constraint if exists website_observations_website_id_attempt_id_run_date_key cascade;
 create table website_observations (
   id uuid not null default gen_random_uuid(),
-  website_id uuid not null references websites(id) on delete cascade,
-  attempt_id uuid not null references run_attempts(id) on delete cascade,
+  website_id uuid not null,
+  attempt_id uuid not null,
   run_date date not null,
   observed_at timestamptz not null default now(),
   official_status official_status not null,
@@ -61,16 +73,22 @@ create table website_observations (
   tech_signals jsonb not null default '{}'::jsonb,
   crawled_pages int not null default 0,
   content_hash text,
-  primary key (id, run_date),
-  unique (website_id, attempt_id, run_date)
+  constraint website_observations_pkey primary key (id, run_date),
+  constraint website_observations_website_id_fkey foreign key (website_id) references websites(id) on delete cascade,
+  constraint website_observations_attempt_id_fkey foreign key (attempt_id) references run_attempts(id) on delete cascade,
+  constraint website_observations_website_id_attempt_id_run_date_key unique (website_id, attempt_id, run_date)
 ) partition by range (run_date);
 
 -- 2-3. channel_observations
 alter table channel_observations rename to channel_observations_old;
+alter table channel_observations_old drop constraint if exists channel_observations_pkey cascade;
+alter table channel_observations_old drop constraint if exists channel_observations_channel_id_fkey cascade;
+alter table channel_observations_old drop constraint if exists channel_observations_attempt_id_fkey cascade;
+alter table channel_observations_old drop constraint if exists channel_observations_channel_id_attempt_id_run_date_key cascade;
 create table channel_observations (
   id uuid not null default gen_random_uuid(),
-  channel_id uuid not null references channels(id) on delete cascade,
-  attempt_id uuid not null references run_attempts(id) on delete cascade,
+  channel_id uuid not null,
+  attempt_id uuid not null,
   run_date date not null,
   is_active boolean,
   last_post_at date,
@@ -82,26 +100,34 @@ create table channel_observations (
   unavailable_reason text,
   observed_at timestamptz not null default now(),
   feed_saturated boolean not null default false,
-  primary key (id, run_date),
-  unique (channel_id, attempt_id, run_date)
+  constraint channel_observations_pkey primary key (id, run_date),
+  constraint channel_observations_channel_id_fkey foreign key (channel_id) references channels(id) on delete cascade,
+  constraint channel_observations_attempt_id_fkey foreign key (attempt_id) references run_attempts(id) on delete cascade,
+  constraint channel_observations_channel_id_attempt_id_run_date_key unique (channel_id, attempt_id, run_date)
 ) partition by range (run_date);
 comment on column channel_observations.feed_saturated is
   '피드가 120일 창을 덮지 못했다. posts_60d·posts_120d 는 하한값이다.';
 
 -- 2-4. search_aggregates (bigserial 시퀀스는 이름을 물려받는다)
 alter table search_aggregates rename to search_aggregates_old;
+alter table search_aggregates_old drop constraint if exists search_aggregates_pkey cascade;
+alter table search_aggregates_old drop constraint if exists search_aggregates_attempt_id_fkey cascade;
+alter table search_aggregates_old drop constraint if exists search_aggregates_company_id_fkey cascade;
+alter table search_aggregates_old drop constraint if exists search_aggregates_keyword_kind_check cascade;
+alter table search_aggregates_old drop constraint if exists search_aggregates_denominator_nonneg cascade;
+alter table search_aggregates_old drop constraint if exists search_aggregates_attempt_id_company_id_keyword_provider_run_date_key cascade;
 alter sequence search_aggregates_id_seq rename to search_aggregates_old_id_seq;
 drop index if exists search_aggregates_cleanup;
 create table search_aggregates (
   id bigserial,
-  attempt_id uuid not null references run_attempts(id) on delete cascade,
-  company_id uuid not null references companies(id) on delete cascade,
+  attempt_id uuid not null,
+  company_id uuid not null,
   run_date date not null,
   keyword text not null,
-  keyword_kind text not null check (keyword_kind in ('brand', 'nonbrand')),
+  keyword_kind text not null,
   provider text not null,
   total_returned int not null,
-  denominator int not null constraint search_aggregates_denominator_nonneg check (denominator >= 0),
+  denominator int not null,
   related_count int not null,
   official_count int not null,
   recency_dist jsonb not null default '{}'::jsonb,
@@ -109,8 +135,12 @@ create table search_aggregates (
   classifier_version text not null,
   ors numeric(5, 4),
   collected_at timestamptz not null default now(),
-  primary key (id, run_date),
-  unique (attempt_id, company_id, keyword, provider, run_date)
+  constraint search_aggregates_pkey primary key (id, run_date),
+  constraint search_aggregates_attempt_id_fkey foreign key (attempt_id) references run_attempts(id) on delete cascade,
+  constraint search_aggregates_company_id_fkey foreign key (company_id) references companies(id) on delete cascade,
+  constraint search_aggregates_keyword_kind_check check (keyword_kind in ('brand', 'nonbrand')),
+  constraint search_aggregates_denominator_nonneg check (denominator >= 0),
+  constraint search_aggregates_attempt_id_company_id_keyword_provider_run_date_key unique (attempt_id, company_id, keyword, provider, run_date)
 ) partition by range (run_date);
 create index search_aggregates_cleanup on search_aggregates (collected_at);
 comment on column search_aggregates.denominator is

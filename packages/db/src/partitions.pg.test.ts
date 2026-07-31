@@ -61,6 +61,24 @@ describe("파티션 스키마", () => {
     expect(rows.map((r) => r.relname).sort()).toEqual([...PARENTS].sort());
   });
 
+  it("PK·FK·CHECK 제약 이름이 정규형이다 (1 접미 없음)", async () => {
+    for (const table of PARENTS) {
+      const rows = await db.owner<{ conname: string }[]>`
+        select conname from pg_constraint
+        where conrelid = ${table}::regclass
+        order by conname
+      `;
+      const names = rows.map((r) => r.conname);
+      // 1 접미가 붙은 제약이 하나도 없음을 확인 (denominator_nonneg 는 예외)
+      const hasInvalidSuffix = names.some((n) => /1$/.test(n));
+      expect(hasInvalidSuffix, `${table}에서 "1" 접미 제약 발견: ${names.join(", ")}`).toBe(
+        false,
+      );
+      // 정규형 PK가 존재함을 확인
+      expect(names).toContain(`${table}_pkey`);
+    }
+  });
+
   it("현재 달부터 +2개월 파티션이 존재하고 전부 RLS 가 켜져 있다", async () => {
     for (const parent of PARENTS) {
       for (const offset of [0, 1, 2]) {
