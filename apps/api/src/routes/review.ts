@@ -88,7 +88,9 @@ export function reviewRoutes(deps: ReviewDeps): Router {
         limit 1
       ) e on true
       where ri.status = ${status}::review_status
-      order by ri.rank
+      -- ❗ 결정된 목록은 최신 결정 순 — 오늘분이 페이지(limit) 안에 있어야 rejectedToday 가 성립한다.
+      --    pending 은 decided_at 이 전부 null 이라 rank 순서가 그대로 유지된다.
+      order by ri.decided_at desc nulls last, ri.rank
       limit ${limit}
     `);
     return { data: rows, meta: { limit, status } };

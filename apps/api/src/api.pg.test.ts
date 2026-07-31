@@ -1109,16 +1109,22 @@ describe("UI 데이터 공백 — /api/me · decided_at · search_hits", () => {
     expect(res.body.data.role).toBe("admin");
   });
 
-  it("제외한 항목의 목록 행에 decided_at 이 있다", async () => {
-    const c = await createCandidate(db);
-    const decision = await call("POST", `/api/review/${c.reviewItemId}/decision`, {
-      token: tokenFor(userId),
-      body: { status: "rejected", reason: "테스트 제외" },
-    });
-    expect(decision.status).toBe(200);
+  it("제외한 항목의 목록 행에 decided_at 이 있고, 결정된 목록은 최신 결정 순이다", async () => {
+    const first = await createCandidate(db);
+    const second = await createCandidate(db);
+    for (const c of [first, second]) {
+      const decision = await call("POST", `/api/review/${c.reviewItemId}/decision`, {
+        token: tokenFor(userId),
+        body: { status: "rejected", reason: "테스트 제외" },
+      });
+      expect(decision.status).toBe(200);
+    }
     const list = await call<{ data: Array<Record<string, unknown>> }>(
       "GET", "/api/review?status=rejected&limit=200", { token: tokenFor(userId) });
-    const row = list.body.data.find((r) => r["id"] === c.reviewItemId);
+    const ids = list.body.data.map((r) => r["id"]);
+    // 나중에 제외한 second 가 first 보다 앞에 온다 (decided_at desc)
+    expect(ids.indexOf(second.reviewItemId)).toBeLessThan(ids.indexOf(first.reviewItemId));
+    const row = list.body.data.find((r) => r["id"] === first.reviewItemId);
     expect(row).toBeDefined();
     expect(row!["decided_at"]).toBeTruthy();
   });
