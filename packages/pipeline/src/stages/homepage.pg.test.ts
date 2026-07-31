@@ -97,7 +97,7 @@ afterAll(async () => {
 /** 모든 호스트명을 loopback 으로 보낸다. SSRF 검증 경로는 그대로 탄다. */
 const resolver: DnsResolver = async () => [{ address: "127.0.0.1", family: 4 }];
 
-function makeContext(runId: string, attemptId: string): StageContext {
+function makeContext(runId: string, attemptId: string, runDate: string): StageContext {
   const http = new HttpClient({
     userAgent: "LeadOpsBot/1.0 (+https://example.kr/bot)",
     perDomainIntervalMs: 0,
@@ -115,6 +115,7 @@ function makeContext(runId: string, attemptId: string): StageContext {
     sql: db.owner,
     runId,
     attemptId,
+    runDate,
     settings: {},
     logger: nullLogger,
     adapters: [],
@@ -130,6 +131,7 @@ interface Seeded {
 
 async function seed(
   attemptId: string,
+  runDate: string,
   spec: { name: string; host: string | null; phone?: string; sigungu?: string; industry?: string },
 ): Promise<Seeded> {
   const suffix = Math.random().toString(36).slice(2, 10);
@@ -142,8 +144,8 @@ async function seed(
   const companyId = company!.id;
 
   await db.owner`
-    insert into company_observations (company_id, attempt_id, status, track)
-    values (${companyId}, ${attemptId}, 'active', 'new')
+    insert into company_observations (company_id, attempt_id, run_date, status, track)
+    values (${companyId}, ${attemptId}, ${runDate}::date, 'active', 'new')
   `;
 
   if (spec.host === null) return { companyId, websiteId: null };
@@ -160,26 +162,28 @@ async function seed(
 describe("homepage_detect — 공식 홈페이지 판별", () => {
   let attemptId: string;
   let runId: string;
+  let runDate: string;
   const ids: Record<string, Seeded> = {};
 
   beforeAll(async () => {
     const run = await createRun(db, "2026-09-01");
     runId = run.runId;
     attemptId = run.attemptId;
+    runDate = run.runDate;
 
-    ids["official"] = await seed(attemptId, {
+    ids["official"] = await seed(attemptId, runDate, {
       name: "라온피부과의원", host: "raon-derm.test", phone: "0212345678", sigungu: "강남구",
     });
-    ids["blocked"] = await seed(attemptId, { name: "차단의원", host: "blocked.test" });
-    ids["broken"] = await seed(attemptId, { name: "고장의원", host: "broken.test" });
-    ids["shell"] = await seed(attemptId, { name: "껍데기의원", host: "shell.test" });
-    ids["aggregator"] = await seed(attemptId, { name: "플레이스의원", host: "place.naver.com" });
-    ids["nolink"] = await seed(attemptId, {
+    ids["blocked"] = await seed(attemptId, runDate, { name: "차단의원", host: "blocked.test" });
+    ids["broken"] = await seed(attemptId, runDate, { name: "고장의원", host: "broken.test" });
+    ids["shell"] = await seed(attemptId, runDate, { name: "껍데기의원", host: "shell.test" });
+    ids["aggregator"] = await seed(attemptId, runDate, { name: "플레이스의원", host: "place.naver.com" });
+    ids["nolink"] = await seed(attemptId, runDate, {
       name: "맑은치과의원", host: "nolink.test", phone: "0517778888", sigungu: "해운대구", industry: "dental",
     });
-    ids["nosite"] = await seed(attemptId, { name: "홈페이지없는의원", host: null });
+    ids["nosite"] = await seed(attemptId, runDate, { name: "홈페이지없는의원", host: null });
 
-    const result = await homepageStage.run(makeContext(runId, attemptId), {});
+    const result = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
     expect(result.processed).toBe(6);
   }, 60_000);
 
@@ -240,7 +244,7 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
 
   it("홈페이지 URL 이 없는 업체를 조용히 넘기지 않는다", async () => {
     // 관측을 남길 website 행이 없으므로 스테이지 결과의 skipped 로만 드러난다.
-    const result = await homepageStage.run(makeContext(runId, attemptId), {});
+    const result = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
     expect(result.skipped["no_homepage_url"]).toBe(1);
     expect(ids["nosite"]!.websiteId).toBeNull();
   });
@@ -249,6 +253,7 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
 describe("연락처 페이지 후보", () => {
   let attemptId: string;
   let runId: string;
+  let runDate: string;
   let official: Seeded;
   let nolink: Seeded;
   let blocked: Seeded;
@@ -257,14 +262,15 @@ describe("연락처 페이지 후보", () => {
     const run = await createRun(db, "2026-09-02");
     runId = run.runId;
     attemptId = run.attemptId;
-    official = await seed(attemptId, {
+    runDate = run.runDate;
+    official = await seed(attemptId, runDate, {
       name: "라온피부과의원", host: "raon-derm.test", phone: "0212345678", sigungu: "강남구",
     });
-    nolink = await seed(attemptId, {
+    nolink = await seed(attemptId, runDate, {
       name: "맑은치과의원", host: "nolink.test", phone: "0517778888", sigungu: "해운대구", industry: "dental",
     });
-    blocked = await seed(attemptId, { name: "차단의원", host: "blocked.test" });
-    await homepageStage.run(makeContext(runId, attemptId), {});
+    blocked = await seed(attemptId, runDate, { name: "차단의원", host: "blocked.test" });
+    await homepageStage.run(makeContext(runId, attemptId, runDate), {});
   }, 60_000);
 
   const pagesOf = async (websiteId: string) =>
@@ -304,7 +310,7 @@ describe("연락처 페이지 후보", () => {
 
   describe("contact_pages 스테이지 — 게이트와 집계", () => {
     it("커버리지를 집계한다", async () => {
-      const result = await contactPagesStage.run(makeContext(runId, attemptId), {});
+      const result = await contactPagesStage.run(makeContext(runId, attemptId, runDate), {});
       // 공식(confirmed·likely) 2곳 중 1곳에서만 후보를 확보했다.
       expect(result.processed).toBe(2);
       expect(result.passed).toBe(1);
@@ -317,7 +323,7 @@ describe("연락처 페이지 후보", () => {
         update website_observations set official_status = 'not_official'
         where website_id = ${official.websiteId!} and attempt_id = ${attemptId}
       `;
-      const result = await contactPagesStage.run(makeContext(runId, attemptId), {});
+      const result = await contactPagesStage.run(makeContext(runId, attemptId, runDate), {});
       expect(result.skipped["revoked_not_official"]).toBeGreaterThan(0);
       expect(await pagesOf(official.websiteId!)).toEqual([]);
     });
@@ -326,25 +332,25 @@ describe("연락처 페이지 후보", () => {
 
 describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 준다", () => {
   it("같은 content_hash 가 3곳 이상이면 전부 not_official 로 강등한다", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-09-05");
+    const { runId, attemptId, runDate } = await createRun(db, "2026-09-05");
     // 서로 다른 도메인이지만 같은 서버(같은 HTML)를 가리키는 상황을 만든다.
     // 국내 ISP 의 NXDOMAIN 하이재킹이 정확히 이 모양이다.
     const sites = [];
     for (let i = 0; i < 3; i++) {
       SITES[`hijack${i}.test`] = SITES["raon-derm.test"]!;
-      sites.push(await seed(attemptId, {
+      sites.push(await seed(attemptId, runDate, {
         name: "라온피부과의원", host: `hijack${i}.test`, phone: "0212345678", sigungu: "강남구",
       }));
     }
 
-    await homepageStage.run(makeContext(runId, attemptId), {});
+    await homepageStage.run(makeContext(runId, attemptId, runDate), {});
 
     const before = await db.owner<Array<{ official_status: string }>>`
       select official_status from website_observations where attempt_id = ${attemptId}
     `;
     expect(before.every((r) => r.official_status === "confirmed")).toBe(true);
 
-    const result = await contactPagesStage.run(makeContext(runId, attemptId), {});
+    const result = await contactPagesStage.run(makeContext(runId, attemptId, runDate), {});
     expect(result.skipped["shared_content"]).toBe(3);
 
     const after = await db.owner<Array<{ official_status: string; signals: Record<string, unknown> }>>`
@@ -362,15 +368,15 @@ describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 �
   }, 60_000);
 
   it("같은 본문이 2곳뿐이면 강등하지 않는다 (한 업체의 도메인 두 개는 정상)", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-09-06");
+    const { runId, attemptId, runDate } = await createRun(db, "2026-09-06");
     for (let i = 0; i < 2; i++) {
       SITES[`twin${i}.test`] = SITES["raon-derm.test"]!;
-      await seed(attemptId, {
+      await seed(attemptId, runDate, {
         name: "라온피부과의원", host: `twin${i}.test`, phone: "0212345678", sigungu: "강남구",
       });
     }
-    await homepageStage.run(makeContext(runId, attemptId), {});
-    const result = await contactPagesStage.run(makeContext(runId, attemptId), {});
+    await homepageStage.run(makeContext(runId, attemptId, runDate), {});
+    const result = await contactPagesStage.run(makeContext(runId, attemptId, runDate), {});
     expect(result.skipped["shared_content"]).toBeUndefined();
 
     const rows = await db.owner<Array<{ official_status: string }>>`
@@ -382,16 +388,16 @@ describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 �
 
 describe("멱등성", () => {
   it("같은 attempt 를 다시 처리해도 관측이 늘지 않는다", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-09-03");
-    const site = await seed(attemptId, {
+    const { runId, attemptId, runDate } = await createRun(db, "2026-09-03");
+    const site = await seed(attemptId, runDate, {
       name: "라온피부과의원", host: "raon-derm.test", phone: "0212345678", sigungu: "강남구",
     });
 
-    const first = await homepageStage.run(makeContext(runId, attemptId), {});
+    const first = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
     expect(first.processed).toBe(1);
 
     // 두 번째 실행은 이미 관측이 있으므로 아무것도 처리하지 않는다.
-    const second = await homepageStage.run(makeContext(runId, attemptId), {});
+    const second = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
     expect(second.processed).toBe(0);
 
     const [row] = await db.owner<Array<{ n: string }>>`
@@ -404,9 +410,9 @@ describe("멱등성", () => {
 
 describe("❗ 설정 누락은 조용히 넘어가지 않는다", () => {
   it("HttpClient 없이 실행하면 configuration_error 로 실패한다", async () => {
-    const { runId, attemptId } = await createRun(db, "2026-09-04");
+    const { runId, attemptId, runDate } = await createRun(db, "2026-09-04");
     const ctx: StageContext = {
-      sql: db.owner, runId, attemptId, settings: {}, logger: nullLogger, adapters: [],
+      sql: db.owner, runId, attemptId, runDate, settings: {}, logger: nullLogger, adapters: [],
     };
     await expect(homepageStage.run(ctx, {})).rejects.toThrow(/HttpClient/);
   });

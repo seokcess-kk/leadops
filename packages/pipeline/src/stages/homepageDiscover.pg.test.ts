@@ -16,12 +16,14 @@ import type { StageContext } from "./types";
 let db: TestDb;
 let runId: string;
 let attemptId: string;
+let runDate: string;
 
 beforeAll(async () => {
   db = await createTestDb("discover");
   const run = await createRun(db);
   runId = run.runId;
   attemptId = run.attemptId;
+  runDate = run.runDate;
 }, 180_000);
 
 afterAll(async () => {
@@ -53,8 +55,8 @@ async function company(over: { name: string; phone?: string | null; sigungu?: st
   const id = row!.id;
   // 발견 스테이지는 이번 attempt 의 관측이 있는 업체만 본다.
   await db.owner`
-    insert into company_observations (company_id, attempt_id, status, content_fingerprint, track)
-    values (${id}, ${attemptId}, 'active', ${`fp-${suffix}`}, 'new')
+    insert into company_observations (company_id, attempt_id, run_date, status, content_fingerprint, track)
+    values (${id}, ${attemptId}, ${runDate}::date, 'active', ${`fp-${suffix}`}, 'new')
   `;
   return id;
 }
@@ -63,6 +65,7 @@ const ctx = (search: SearchAdapter | undefined): StageContext => ({
   sql: db.owner,
   runId,
   attemptId,
+  runDate,
   // `quotaSettingsFrom` 은 세 쿼터를 모두 요구한다 (누락은 configuration_error).
   settings: {
     quota: { naver_daily_cap: 20000, youtube_daily_units: 9000, data_go_kr_daily_cap: 9000 },
