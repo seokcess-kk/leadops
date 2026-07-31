@@ -12,7 +12,8 @@
 ### 1.1 DB 마이그레이션
 
 ```bash
-# Supabase — ❗ --bootstrap 을 쓰지 않는다. auth 스키마와 역할은 Supabase 가 이미 제공한다.
+# Supabase — ❗ --bootstrap 을 쓰지 않는다. auth 스키마와 anon·authenticated·service_role 은
+# Supabase 가 제공하고, 우리 전용 역할 leadops_worker 는 0001 이 없으면 만든다 (멱등).
 DATABASE_URL="$SUPABASE_DB_URL" pnpm db:migrate
 
 # 자체 호스팅 — 역할·auth 스텁을 직접 만든다
