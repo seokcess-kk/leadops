@@ -4,6 +4,17 @@
 create schema if not exists extensions;
 create extension if not exists citext with schema extensions;
 
+-- ❗ leadops_worker 는 우리 전용 역할이다. anon·authenticated·service_role 은 Supabase 가
+--    제공하지만 이 역할은 아니다 — 로컬은 0000(bootstrap)이 만들지만 Supabase 경로는
+--    0000 을 건너뛰므로(런북 1.1) 여기서 보장한다. 첫 실배포(2026-07-31)에서 실증된 결함.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'leadops_worker') then
+    create role leadops_worker nologin noinherit;
+  end if;
+end
+$$;
+
 grant usage on schema extensions to anon, authenticated, service_role, leadops_worker;
 
 -- ── 권한 ──
