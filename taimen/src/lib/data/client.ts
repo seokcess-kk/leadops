@@ -69,6 +69,7 @@ export interface ApiReviewRow {
   id: string;
   rank: number;
   status: string;
+  decided_at: string | null;
   company_id: string;
   name: string;
   industry: string;
@@ -101,6 +102,16 @@ export interface ApiReviewDetail {
   ors: Array<Record<string, unknown>>;
   competitors: Array<Record<string, unknown>>;
   email: Record<string, unknown> | null;
+  search_hits: Array<{
+    keyword: string;
+    rank: number;
+    channel_type: string;
+    is_official: boolean;
+    url: string;
+    title: string | null;
+    published_at: string | null;
+    recency: string;
+  }>;
   nonce: string | null;
 }
 
@@ -137,9 +148,8 @@ export interface ApiLeadRow {
 /**
  * `runs` 한 행.
  *
- * ❗ `counts` 는 스키마에만 있고 **아무도 쓰지 않는다** (마이그레이션 0002 에 선언, 파이프라인
- *    어디에서도 update 하지 않음). 항상 `{}` 이므로 퍼널 카운터의 출처로 쓸 수 없다 —
- *    화면은 이 값을 근거로 숫자를 만들지 않는다.
+ * ❗ `counts` 는 파이프라인이 collect·score 스테이지 terminal 시점에 채운다
+ *    (`raw_candidates`·`analyzed`). 그 이전(구버전) 실행은 빈 객체다 — 소급하지 않는다.
  * ❗ 네이버 쿼터는 실행 단위로 기록되지 않는다. `cost_ledger` 는 일 단위 원장이므로
  *    "이 실행이 쿼터를 얼마 썼는지" 는 API 가 알려 줄 수 없다.
  */
@@ -312,7 +322,15 @@ export interface ApiCosts {
   todayKrw: number;
 }
 
+export interface ApiMe {
+  id: string;
+  email: string;
+  role: string;
+}
+
 export const api = {
+  me: () => request<ApiMe>("GET", "api/me"),
+
   reviewList: (status = "pending", limit = 200) =>
     request<ApiReviewRow[]>("GET", `api/review?status=${status}&limit=${limit}`),
 

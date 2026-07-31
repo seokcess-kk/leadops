@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api, type ApiMe } from "@/lib/data/client";
 
 interface NavItem {
   href: string;
@@ -48,6 +50,13 @@ const NAV: NavGroup[] = [
  */
 export function Sidebar() {
   const pathname = usePathname();
+
+  // ❗ 하드코딩하지 않는다. 실패·로딩 중에는 가짜 이름 대신 `—` 를 보여 준다.
+  const [me, setMe] = useState<ApiMe | null>(null);
+  useEffect(() => {
+    api.me().then((r) => setMe(r.data)).catch(() => setMe(null));
+  }, []);
+  const roleLabel = me === null ? "—" : me.role === "admin" ? "Admin" : me.role === "user" ? "Reviewer" : me.role;
 
   return (
     <aside className="fixed inset-y-0 left-0 z-20 flex w-[232px] flex-col border-r border-line bg-canvas">
@@ -96,14 +105,14 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* 사용자 */}
+      {/* 사용자 — /api/me. fixture 모드·인증 실패 시 — 표시 */}
       <div className="flex items-center gap-3 border-t border-line px-5 py-4">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface text-xs font-semibold text-fg-3">
-          S
+          {me?.email?.[0]?.toUpperCase() ?? "—"}
         </span>
         <div className="flex min-w-0 flex-col">
-          <span className="truncate text-xs text-fg-3">seokcess@glitzy.kr</span>
-          <span className="mono-label text-[8px]">Reviewer</span>
+          <span className="truncate text-xs text-fg-3">{me?.email ?? "—"}</span>
+          <span className="mono-label text-[8px]">{roleLabel}</span>
         </div>
       </div>
     </aside>

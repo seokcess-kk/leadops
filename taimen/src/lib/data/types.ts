@@ -127,8 +127,10 @@ export interface EnteredEmail {
 }
 
 export interface SearchAsset {
-  channel: OrsChannel | "youtube" | "place";
+  /** DB `channel_type` 어휘 그대로 (표시 전용 — 변환 계층을 두지 않는다). */
+  channel: string;
   title: string;
+  /** 발행일 (YYYY-MM-DD). 발행일을 모르면 빈 문자열 — 수집일로 대체하지 않는다. */
   date: string;
   official: boolean;
 }
@@ -337,11 +339,11 @@ export interface IndustryConfig {
  * ❗ `null` 은 **모른다**는 뜻이고 0 과 다르다 (설계서 A.6). 화면은 `null` 을 `—` 로 그린다.
  *    0 으로 채우면 "수집한 것이 없다" 로 읽혀 운영자가 실행이 실패한 것으로 오해한다.
  *
- *  - `rawCandidates`·`analyzed` — **어떤 엔드포인트도 주지 않는다.** `runs.counts` 는 선언만
- *    되어 있고 파이프라인이 쓰지 않아 항상 `{}` 다. 백엔드가 채우기 전까지 항상 `null` 이다.
+ *  - `rawCandidates`·`analyzed` — 오늘 run 의 `runs.counts` 스냅샷. 오늘 실행이 없거나
+ *    구버전 실행(빈 counts)이면 `null` 이다.
+ *  - `rejected` — `/api/review?status=rejected` 목록의 `decided_at` 오늘(KST)분.
+ *    목록 limit(200)를 넘는 날은 하한값이다 — 일 상한 50 체제에서 현실적으로 없다.
  *  - `costKrw`·`naverQuotaPct` — `/api/costs` 가 admin 전용이다. 검수자 권한이면 `null`.
- *  - `rejected` — 목록 응답에 `decided_at` 이 없어 **오늘분을 가려낼 수 없다.** 누적값을
- *    오늘 값처럼 보여 주지 않으려고 `null` 로 둔다.
  */
 export interface TodayMetrics {
   rawCandidates: number | null;

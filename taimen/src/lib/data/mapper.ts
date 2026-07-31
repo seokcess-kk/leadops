@@ -267,8 +267,13 @@ export function mapDetail(payload: ApiReviewDetail): ReviewItem {
     activity60d: activity.activity60d,
     activity120d: activity.activity120d,
     ...(activity.lastContentAt === undefined ? {} : { lastContentAt: activity.lastContentAt }),
-    // ⚠️ 검색 결과물 목록은 API 가 아직 제공하지 않는다 (search_hits 미노출).
-    searchAssets: [],
+    searchAssets: payload.search_hits.map((h) => ({
+      channel: h.channel_type,
+      // 제목이 없으면 URL 을 보여 준다 — 링크가 무엇인지는 알려야 한다.
+      title: h.title ?? h.url,
+      date: h.published_at ?? "",
+      official: h.is_official,
+    })),
     contactPages: contactPagesOf(payload.contactPages),
     primaryService: text(item["primary_service"]) || "미정",
     secondaryServices: Array.isArray(item["secondary_services"]) ? (item["secondary_services"] as string[]) : [],
