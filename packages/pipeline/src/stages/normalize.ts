@@ -132,14 +132,14 @@ export const normalizeStage: StageHandler = {
 
           await tx`
             insert into company_observations (
-              company_id, attempt_id, status, content_fingerprint, change_detected, track, summary
+              company_id, attempt_id, run_date, status, content_fingerprint, change_detected, track, summary
             )
             values (
-              ${company!.id}, ${ctx.attemptId}, ${c.status}, ${fingerprint},
+              ${company!.id}, ${ctx.attemptId}, ${ctx.runDate}::date, ${c.status}, ${fingerprint},
               ${changed}, ${track},
               ${tx.json({ source: c.source, externalId: c.externalId, dedupeBasis: dedupe.basis, dedupeConfidence: dedupe.confidence })}
             )
-            on conflict (company_id, attempt_id) do update set
+            on conflict (company_id, attempt_id, run_date) do update set
               status = excluded.status,
               content_fingerprint = excluded.content_fingerprint,
               change_detected = excluded.change_detected,

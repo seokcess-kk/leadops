@@ -15,6 +15,8 @@ export interface StageContext {
   sql: Sql;
   runId: string;
   attemptId: string;
+  /** 이 실행의 runs.run_date (YYYY-MM-DD). 관측 테이블의 파티션 키다 — 재시도에 불변. */
+  runDate: string;
   /** 실행 시작 시점에 동결된 설정. 실행 중 설정이 바뀌어도 영향받지 않는다. */
   settings: Record<string, unknown>;
   logger: Logger;

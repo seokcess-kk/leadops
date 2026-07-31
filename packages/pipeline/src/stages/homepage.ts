@@ -242,16 +242,16 @@ async function persist(ctx: FetchingStageContext, target: Target, outcome: Inspe
   await ctx.sql.begin(async (tx) => {
     await tx`
       insert into website_observations (
-        website_id, attempt_id, official_status, official_score, signals,
+        website_id, attempt_id, run_date, official_status, official_score, signals,
         robots_allowed, has_noindex, has_contact_form_only, http_status,
         tech_signals, crawled_pages, content_hash
       ) values (
-        ${target.website_id}, ${ctx.attemptId}, ${verdict.status}::official_status, ${verdict.score},
+        ${target.website_id}, ${ctx.attemptId}, ${ctx.runDate}::date, ${verdict.status}::official_status, ${verdict.score},
         ${tx.json(verdict.signals)}, ${outcome.robotsAllowed}, ${outcome.hasNoindex},
         ${verdict.hasContactFormOnly}, ${outcome.httpStatus},
         ${tx.json({ domainClass: verdict.domainClass })}, ${outcome.crawledPages}, ${outcome.contentHash}
       )
-      on conflict (website_id, attempt_id) do update set
+      on conflict (website_id, attempt_id, run_date) do update set
         official_status = excluded.official_status,
         official_score = excluded.official_score,
         signals = excluded.signals,
