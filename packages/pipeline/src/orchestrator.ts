@@ -186,6 +186,24 @@ export async function advanceAttempt(sql: Sql, attemptId: string, logger: Logger
             finished_at = case when ${isTerminal(status)} then coalesce(finished_at, now()) else null end
         where attempt_id = ${attemptId} and stage = ${stage}
       `;
+
+      // ❗ 퍼널 스냅샷: terminal 시점의 실측을 runs.counts 에 남긴다 (README "아직 없는 것").
+      //    raw_candidates 는 7일 보관이라 조회 시 집계하면 지난 실행이 영구 결손된다.
+      //    terminal 이후 재호출은 같은 값을 다시 쓸 뿐이다 (멱등).
+      if (stage === "collect" && isTerminal(status)) {
+        await sql`
+          update runs set counts = counts || jsonb_build_object(
+            'raw_candidates', (select count(*) from raw_candidates where attempt_id = ${attemptId}))
+          where id = (select run_id from run_attempts where id = ${attemptId})
+        `;
+      }
+      if (stage === "score" && isTerminal(status)) {
+        await sql`
+          update runs set counts = counts || jsonb_build_object(
+            'analyzed', (select count(*) from scores where attempt_id = ${attemptId}))
+          where id = (select run_id from run_attempts where id = ${attemptId})
+        `;
+      }
     }
   }
 
