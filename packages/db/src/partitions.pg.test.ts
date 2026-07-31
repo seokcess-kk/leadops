@@ -213,6 +213,22 @@ describe("search_hits 복합 FK", () => {
   });
 });
 
+describe("run_attempts cascade", () => {
+  it("run_attempts 삭제가 company_observations 로 cascade 된다 (스펙 테스트 §5)", async () => {
+    const runDate = monthStart(0).iso;
+    const { attemptId, companyId } = await seedAttempt(runDate);
+    await db.owner`
+      insert into company_observations (company_id, attempt_id, run_date, status, track)
+      values (${companyId}, ${attemptId}, ${runDate}::date, 'active', 'new')
+    `;
+    await db.owner`delete from run_attempts where id = ${attemptId}`;
+    const rows = await db.owner<{ id: string }[]>`
+      select id from company_observations where attempt_id = ${attemptId}
+    `;
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("maintain_observation_partitions()", () => {
   it("365일 초과 파티션을 drop 하고 반환 jsonb 에 남긴다 · 선생성은 멱등", async () => {
     // 만료 파티션을 직접 만들어 둔다 (25개월 전 — 상한도 365일 초과).
@@ -224,11 +240,14 @@ describe("maintain_observation_partitions()", () => {
     );
     await db.owner.unsafe(`alter table company_observations_${old.name} enable row level security`);
 
-    const [row] = await db.owner<{ maintain_observation_partitions: { created: string[]; dropped: string[] } }[]>`
+    const [row] = await db.owner<
+      { maintain_observation_partitions: { created: string[]; dropped: string[]; errors: string[] } }[]
+    >`
       select public.maintain_observation_partitions()
     `;
     const result = row!.maintain_observation_partitions;
     expect(result.dropped.join(",")).toContain(`company_observations_${old.name}`);
+    expect(result.errors).toEqual([]);
 
     const gone = await db.owner<{ relname: string }[]>`
       select relname from pg_class where relname = ${`company_observations_${old.name}`}
@@ -236,11 +255,14 @@ describe("maintain_observation_partitions()", () => {
     expect(gone).toHaveLength(0);
 
     // 두 번째 호출: 이미 다 있으므로 아무것도 만들지도 지우지도 않는다.
-    const [again] = await db.owner<{ maintain_observation_partitions: { created: string[]; dropped: string[] } }[]>`
+    const [again] = await db.owner<
+      { maintain_observation_partitions: { created: string[]; dropped: string[]; errors: string[] } }[]
+    >`
       select public.maintain_observation_partitions()
     `;
     expect(again!.maintain_observation_partitions.created).toEqual([]);
     expect(again!.maintain_observation_partitions.dropped).toEqual([]);
+    expect(again!.maintain_observation_partitions.errors).toEqual([]);
   });
 
   it("worker 는 실행할 수 있고 authenticated 는 실행할 수 없다", async () => {

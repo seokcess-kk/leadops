@@ -82,6 +82,7 @@ taimen/             검수 콘솔 UI (Next.js 16 · 실데이터 · 독립 pnpm 
 | `0011_admin_rpcs` | 실행 취소·재시도 · 키워드 승인 · 경쟁사 교체 · 개인정보 접수 |
 | `0012_ops_privacy_capacity` | 개인정보 **집행** · 용량 게이트 · 스케줄 판정 |
 | `0013_fix_setting_paths` | **결함 수정** — `settings` 단일 행에 중첩 jsonb 경로를 쓴 곳 (아래) |
+| `0014_homepage_discovery` | 홈페이지 발견 스테이지 — `websites.discovery_source`·`discovery_basis` |
 | `0015_partition_observations` | 관측 4테이블 월 파티션 · `run_date` 키 · 365일 detach→drop |
 
 `packages/db/migrations/deploy/` 는 **체인에 없다.** `pg_cron_schedule.sql` 은 pg_cron·pg_net 이

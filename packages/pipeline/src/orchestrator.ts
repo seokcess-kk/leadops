@@ -54,7 +54,19 @@ export async function startRun(sql: Sql, options: StartRunOptions): Promise<Star
 
   // ❗ 파티션을 실행 전에 보장한다. run_date 파티션이 없으면 관측 insert 가 그 자리에서
   //    죽는다 (default 파티션을 두지 않았다 — 조용한 오라우팅 방지). 이 호출이 안전망이다.
-  await sql`select public.maintain_observation_partitions()`;
+  const [partitions] = await sql<Array<{ maintain_observation_partitions: Record<string, unknown> }>>`
+    select public.maintain_observation_partitions()
+  `;
+  const partitionResult = partitions?.maintain_observation_partitions ?? {};
+  const created = (partitionResult["created"] as unknown[] | undefined) ?? [];
+  const dropped = (partitionResult["dropped"] as unknown[] | undefined) ?? [];
+  const errors = (partitionResult["errors"] as unknown[] | undefined) ?? [];
+  if (created.length > 0 || dropped.length > 0) {
+    options.logger.info("partitions.maintained", { created, dropped });
+  }
+  if (errors.length > 0) {
+    options.logger.warn("partitions.maintained", { created, dropped, errors });
+  }
 
   // ❗ 용량 게이트를 **실행을 만들기 전에** 통과한다 (설계서 4.2 · 90% 도달 시 차단).
   //    꽉 찬 뒤에 멈추면 그 순간의 쓰기가 실패하면서 중간 상태가 남는다. 여기서 던지는

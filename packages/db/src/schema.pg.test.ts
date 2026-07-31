@@ -55,12 +55,14 @@ describe("마이그레이션", () => {
 });
 
 describe("❗ P1 완료 기준: RLS 린트", () => {
-  it("public 스키마의 모든 테이블에 RLS 가 켜져 있다", async () => {
+  it("public 스키마의 모든 테이블(파티션 부모 포함)에 RLS 가 켜져 있다", async () => {
+    // relkind='p' 는 파티션 부모(예: company_observations) — 파티션 자식은 'r' 로 이미 잡힌다.
+    // 부모에 RLS 가 안 켜져 있으면 그 부모로의 직접 질의가 보호받지 못한다.
     const rows = await db.owner<{ relname: string }[]>`
       select c.relname
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity = false
+      where n.nspname = 'public' and c.relkind in ('r', 'p') and c.relrowsecurity = false
       order by c.relname
     `;
     expect(rows.map((r) => r.relname)).toEqual([]);

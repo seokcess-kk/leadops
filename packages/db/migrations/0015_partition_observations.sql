@@ -272,13 +272,17 @@ declare
   v_name text;
   v_created text[] := '{}';
   v_dropped text[] := '{}';
+  v_errors text[] := '{}';
   v_child record;
   v_m text[];
   v_upper date;
+  v_rows bigint;
 begin
   foreach v_parent in array v_parents loop
     -- 선생성: 이번 달 ~ +2개월. 실행 직전(startRun)에도 불리므로 파티션 부재로
     -- insert 가 죽는 일이 없다 (default 파티션을 두지 않는 대신의 안전망).
+    -- 존재 확인 후 create 사이에 경쟁이 있을 수 있다 (월 경계 직후 pg_cron 과 수동 실행이
+    -- 겹치는 경우) — duplicate_table 을 흡수해 다른 세션이 먼저 만든 것을 받아들인다.
     for i in 0..2 loop
       v_month := (date_trunc('month', now()) + make_interval(months => i))::date;
       v_name := format('%s_y%sm%s', v_parent, to_char(v_month, 'YYYY'), to_char(v_month, 'MM'));
@@ -286,23 +290,29 @@ begin
         select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where c.relname = v_name and n.nspname = 'public'
       ) then
-        execute format(
-          'create table %I partition of %I for values from (%L) to (%L)',
-          v_name, v_parent, v_month, (v_month + interval '1 month')::date
-        );
-        execute format('alter table %I enable row level security', v_name);
-        v_created := v_created || v_name;
+        begin
+          execute format(
+            'create table %I partition of %I for values from (%L) to (%L)',
+            v_name, v_parent, v_month, (v_month + interval '1 month')::date
+          );
+          execute format('alter table %I enable row level security', v_name);
+          v_created := v_created || v_name;
+        exception when duplicate_table then
+          null;  -- 동시 호출이 먼저 만들었다 — 이번 호출은 아무것도 하지 않은 것으로 취급
+        end;
       end if;
     end loop;
 
     -- 만료: 파티션 상한(다음 달 1일)이 365일 전보다 오래됐으면 detach → 즉시 drop.
     -- 이름에서 월을 파싱한다 — 우리가 만든 파티션만 이 규칙을 따르므로 안전하다.
+    -- 선생성 쪽과 동일하게 스키마를 public 으로 좁혀 이름이 겹치는 다른 스키마 객체를 건드리지 않는다.
     for v_child in
       select c.relname
       from pg_inherits i
       join pg_class c on c.oid = i.inhrelid
       join pg_class p on p.oid = i.inhparent
-      where p.relname = v_parent
+      join pg_namespace n on n.oid = p.relnamespace
+      where p.relname = v_parent and n.nspname = 'public'
     loop
       v_m := regexp_match(v_child.relname, '_y(\d{4})m(\d{2})$');
       if v_m is null then
@@ -310,14 +320,21 @@ begin
       end if;
       v_upper := (make_date(v_m[1]::int, v_m[2]::int, 1) + interval '1 month')::date;
       if v_upper <= (now() - interval '365 days')::date then
-        execute format('alter table %I detach partition %I', v_parent, v_child.relname);
-        execute format('drop table %I', v_child.relname);
-        v_dropped := v_dropped || v_child.relname;
+        -- 파티션별로 격리한다 — 하나가 실패해도(잠금 경합 등) 나머지와 startRun 전체를
+        -- 롤백시키지 않는다. 실패는 errors 에 남기고 다음 파티션을 계속 처리한다.
+        begin
+          execute format('select count(*) from %I', v_child.relname) into v_rows;
+          execute format('alter table %I detach partition %I', v_parent, v_child.relname);
+          execute format('drop table %I', v_child.relname);
+          v_dropped := v_dropped || format('%s(%s rows)', v_child.relname, v_rows);
+        exception when others then
+          v_errors := v_errors || format('%s: %s', v_child.relname, sqlerrm);
+        end;
       end if;
     end loop;
   end loop;
 
-  return jsonb_build_object('created', v_created, 'dropped', v_dropped);
+  return jsonb_build_object('created', v_created, 'dropped', v_dropped, 'errors', v_errors);
 end;
 $$;
 revoke execute on function public.maintain_observation_partitions() from public;
