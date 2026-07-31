@@ -12,6 +12,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * ❗ env 미구성이면 null — 조용한 폴백이 아니라 "Supabase 경로 없음" 이다. 호출자
  *    (sessionToken)가 dev 경로 또는 401 로 흐른다. 로컬 개발은 env 없이 지금처럼 동작한다.
+ *
+ * ❗ @supabase/ssr 이 setAll 2번째 인자로 주는 캐시 방지 헤더는 응답 레벨에서 처리한다 —
+ *    auth 라우트는 json() 이, middleware 는 쿠키 갱신 시 cache-control 을 직접 강제한다.
  */
 export async function supabaseServer(): Promise<SupabaseClient | null> {
   const url = process.env["SUPABASE_URL"];
