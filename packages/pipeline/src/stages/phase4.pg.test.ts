@@ -1,6 +1,6 @@
 import { MockSearchAdapter } from "@leadops/adapters";
 import { nullLogger } from "@leadops/core";
-import { createRun, createTestDb, type TestDb } from "@leadops/db";
+import { createRun, createTestDb, relativeDate, type TestDb } from "@leadops/db";
 import { RobotsGate, type FetchResult, type HttpClient } from "@leadops/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { QuotaGuard, quotaSettingsFrom } from "../quota";
@@ -17,17 +17,6 @@ import type { StageContext } from "./types";
  */
 
 let db: TestDb;
-
-/**
- * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
- * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
- * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
- */
-function relativeDate(daysFromToday: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysFromToday);
-  return d.toISOString().slice(0, 10);
-}
 
 const RSS = (dates: readonly string[]): string =>
   `<?xml version="1.0"?><rss version="2.0"><channel><title>공식블로그</title>${dates
@@ -269,6 +258,7 @@ describe("search_analyze — ORS", () => {
   }
 
   it("❗ 검색 어댑터가 없으면 실패가 아니라 건너뛴다 (축소 파이프라인)", async () => {
+    // 이 블록은 관측 테이블에 insert 하지 않아(QuotaGuard·runs 만) 파티션 창과 무관 — 고정 날짜가 안전하다.
     const { runId, attemptId, runDate } = await createRun(db, "2026-10-20");
     const ctx: StageContext = {
       sql: db.owner, runId, attemptId, runDate, settings, logger: nullLogger, adapters: [],

@@ -31,6 +31,10 @@ export function ymd(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? DASH : dateFmt.format(d);
 }
 
+/** Date 또는 ISO 문자열 → KST 달력 날짜 (YYYY-MM-DD). "오늘" 판정의 유일한 기준. */
+export const kstDate = (input: Date | string): string =>
+  dateFmt.format(typeof input === "string" ? new Date(input) : input);
+
 export function krw(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value)
     ? `₩${Math.round(value).toLocaleString("ko-KR")}`

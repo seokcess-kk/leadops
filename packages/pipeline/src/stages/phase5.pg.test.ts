@@ -1,5 +1,5 @@
 import { nullLogger } from "@leadops/core";
-import { createRun, createTestDb, type TestDb } from "@leadops/db";
+import { createRun, createTestDb, relativeDate, type TestDb } from "@leadops/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { competitorAnalyzeStage, competitorSelectStage } from "./competitor";
 import { scoreStage } from "./score";
@@ -14,17 +14,6 @@ import type { StageContext } from "./types";
  */
 
 let db: TestDb;
-
-/**
- * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
- * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
- * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
- */
-function relativeDate(daysFromToday: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysFromToday);
-  return d.toISOString().slice(0, 10);
-}
 
 const SETTINGS = {
   scoring: {

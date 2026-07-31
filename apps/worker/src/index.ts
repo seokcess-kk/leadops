@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { hostname } from "node:os";
-import { createSearchAdapter, createSourceAdapters } from "@leadops/adapters";
+import { createSearchAdapter, createSourceAdapters, naverLegacySunsetWarning } from "@leadops/adapters";
 import { configError, createLogger, getEnv, Industry, LeadOpsError, type Industry as IndustryT } from "@leadops/core";
 import { createHttpClient, RobotsGate, userAgentToken } from "@leadops/http";
 import { startRun } from "@leadops/pipeline";
@@ -119,6 +119,10 @@ async function main(): Promise<number> {
     logger.info("ors.disabled", {
       note: "FEATURE_ORS=off — 검색 분석 없이 채널 활성도 중심 축소 파이프라인으로 동작합니다.",
     });
+  }
+  if (search) {
+    const sunset = naverLegacySunsetWarning(new Date());
+    if (sunset) logger.warn("naver.legacy_sunset", { note: sunset });
   }
   const worker = new Worker({ sql, logger, adapters, http, robots, search, workerId });
 

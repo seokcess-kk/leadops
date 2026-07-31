@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { nullLogger } from "@leadops/core";
-import { createRun, createTestDb, type TestDb } from "@leadops/db";
+import { createRun, createTestDb, relativeDate, type TestDb } from "@leadops/db";
 import { HttpClient, loopbackPolicyForTests, RobotsGate, type DnsResolver } from "@leadops/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { contactPagesStage } from "./contactPages";
@@ -61,17 +61,6 @@ const SITES: Record<string, Site> = {
 let db: TestDb;
 let server: Server;
 let port: number;
-
-/**
- * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
- * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
- * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
- */
-function relativeDate(daysFromToday: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysFromToday);
-  return d.toISOString().slice(0, 10);
-}
 
 const hostOf = (req: { headers: { host?: string | undefined } }): string =>
   (req.headers.host ?? "").split(":")[0]!.toLowerCase();

@@ -1,6 +1,6 @@
 import { MockSourceAdapter } from "@leadops/adapters";
 import { nullLogger } from "@leadops/core";
-import { createTestDb, type TestDb } from "@leadops/db";
+import { createTestDb, relativeDate, type TestDb } from "@leadops/db";
 import { HttpClient, loopbackPolicyForTests, RobotsGate, type DnsResolver } from "@leadops/http";
 import { advanceAttempt, stageOrder, startRun } from "@leadops/pipeline";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,19 +20,6 @@ import { Worker } from "./loop";
 
 let db: TestDb;
 const adapters = [new MockSourceAdapter()];
-
-/**
- * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트를 실제로 실행하는
- * 시각 기준이므로, 고정 절대 날짜는 달력에 따라 창 밖으로 밀려나 관측 insert 가
- * "no partition of relation found for row" 로 깨진다 — packages/db/src/fixtures.ts 의
- * `createRun` 동적 기본값과 같은 이유다. 서로 다른 오프셋을 쓰는 것은 각 run 을
- * 구분하기 위함일 뿐 절대 날짜 값 자체에는 의미가 없다.
- */
-function relativeDate(daysFromToday: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + daysFromToday);
-  return d.toISOString().slice(0, 10);
-}
 
 const RUN_DATE_MAIN = relativeDate(0);
 const RUN_DATE_IDEMPOTENT = relativeDate(1);

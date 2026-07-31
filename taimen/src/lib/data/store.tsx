@@ -22,6 +22,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from "react";
 import { api, ApiError, type ApiSettingRow } from "./client";
 import { leads as leadFixture, reviewItems as reviewFixture, runs as runFixture, todayMetrics } from "./fixtures";
+import { kstDate } from "./format";
 import { mapDetail, mapLead, mapListItem } from "./mapper";
 import type { EmailType, EnteredEmail, Lead, ReviewItem, TodayMetrics } from "./types";
 
@@ -199,8 +200,7 @@ function toNotice(err: unknown): Notice {
  *    기준이므로(`(now() at time zone 'Asia/Seoul')::date`), 여기가 어긋나면 화면의
  *    "오늘 승인 3/50" 과 서버가 세는 값이 달라진다.
  */
-export const seoulToday = (): string =>
-  new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
+export const seoulToday = (): string => kstDate(new Date());
 
 const objectValue = (rows: ApiSettingRow[], key: string): Record<string, unknown> | undefined => {
   const row = rows.find((r) => r.key === key);
@@ -241,10 +241,8 @@ async function loadOps(): Promise<OpsSnapshot> {
     : null;
 
   const today = seoulToday();
-  const seoulDate = (iso: string): string =>
-    new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date(iso));
   // ❗ 오늘 run 의 counts 만 퍼널에 쓴다. 어제 실행의 수집량을 오늘 것처럼 보여 주지 않는다.
-  const todayCounts = latest && seoulDate(latest.run_date) === today ? latest.counts : {};
+  const todayCounts = latest && kstDate(latest.run_date) === today ? latest.counts : {};
 
   return {
     latestRunId: latest?.id ?? null,
@@ -261,7 +259,7 @@ async function loadOps(): Promise<OpsSnapshot> {
     rejectedToday:
       rejectedRows === null
         ? null
-        : rejectedRows.filter((r) => r.decided_at !== null && seoulDate(r.decided_at) === today).length,
+        : rejectedRows.filter((r) => r.decided_at !== null && kstDate(r.decided_at) === today).length,
     costsForbidden: costs.forbidden,
   };
 }

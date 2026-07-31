@@ -2,6 +2,18 @@ import type { TestDb } from "./testDb";
 
 /** 통합 테스트용 최소 데이터 세트. 실제 파이프라인이 만들 모양과 같게 유지한다. */
 
+/**
+ * 오늘(UTC) 기준 상대 날짜 (YYYY-MM-DD).
+ *
+ * ❗ pg 테스트가 절대 날짜를 하드코딩하면 파티션 창(현재 달~+2개월) 밖으로 밀려나
+ *    달력이 흐르면 깨진다. 관측 테이블에 닿는 날짜는 이것으로 만든다.
+ */
+export function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
 export interface Candidate {
   companyId: string;
   runId: string;
