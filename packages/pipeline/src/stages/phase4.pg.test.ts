@@ -18,6 +18,17 @@ import type { StageContext } from "./types";
 
 let db: TestDb;
 
+/**
+ * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
+ * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
+ * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
+ */
+function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
 const RSS = (dates: readonly string[]): string =>
   `<?xml version="1.0"?><rss version="2.0"><channel><title>공식블로그</title>${dates
     .map((d, i) => `<item><title>글 ${i} 이벤트</title><pubDate>${d}</pubDate></item>`)
@@ -126,7 +137,7 @@ describe("channel_analyze — 공식 채널 활성도", () => {
   const ids: Record<string, string> = {};
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-08-10");
+    const run = await createRun(db, relativeDate(1));
     runId = run.runId;
     attemptId = run.attemptId;
     runDate = run.runDate;
@@ -268,7 +279,7 @@ describe("search_analyze — ORS", () => {
   });
 
   it("업체별 4채널을 집계하고 키워드를 저장한다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-21");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(2));
     const companyId = await seedOfficial(attemptId, runDate, "라온피부과의원");
     const adapter = new MockSearchAdapter();
 
@@ -330,7 +341,7 @@ describe("search_analyze — ORS", () => {
   });
 
   it("❗ 쿼터가 소진되면 그 자리에서 멈춘다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-22");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(3));
     await seedOfficial(attemptId, runDate, "쿼터소진의원");
     const adapter = new MockSearchAdapter();
     // 쿼터는 provider 단위 · 하루 단위다. 앞 테스트가 이미 쓴 몫을 비워 의도를 분명히 한다.

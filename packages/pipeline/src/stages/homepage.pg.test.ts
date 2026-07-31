@@ -62,6 +62,17 @@ let db: TestDb;
 let server: Server;
 let port: number;
 
+/**
+ * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
+ * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
+ * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
+ */
+function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
 const hostOf = (req: { headers: { host?: string | undefined } }): string =>
   (req.headers.host ?? "").split(":")[0]!.toLowerCase();
 
@@ -166,7 +177,7 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
   const ids: Record<string, Seeded> = {};
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-09-01");
+    const run = await createRun(db, relativeDate(1));
     runId = run.runId;
     attemptId = run.attemptId;
     runDate = run.runDate;
@@ -259,7 +270,7 @@ describe("연락처 페이지 후보", () => {
   let blocked: Seeded;
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-09-02");
+    const run = await createRun(db, relativeDate(2));
     runId = run.runId;
     attemptId = run.attemptId;
     runDate = run.runDate;
@@ -332,7 +343,7 @@ describe("연락처 페이지 후보", () => {
 
 describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 준다", () => {
   it("같은 content_hash 가 3곳 이상이면 전부 not_official 로 강등한다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-09-05");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(5));
     // 서로 다른 도메인이지만 같은 서버(같은 HTML)를 가리키는 상황을 만든다.
     // 국내 ISP 의 NXDOMAIN 하이재킹이 정확히 이 모양이다.
     const sites = [];
@@ -368,7 +379,7 @@ describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 �
   }, 60_000);
 
   it("같은 본문이 2곳뿐이면 강등하지 않는다 (한 업체의 도메인 두 개는 정상)", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-09-06");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(6));
     for (let i = 0; i < 2; i++) {
       SITES[`twin${i}.test`] = SITES["raon-derm.test"]!;
       await seed(attemptId, runDate, {
@@ -388,7 +399,7 @@ describe("❗ DNS 하이재킹 방어 — 여러 도메인이 같은 본문을 �
 
 describe("멱등성", () => {
   it("같은 attempt 를 다시 처리해도 관측이 늘지 않는다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-09-03");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(3));
     const site = await seed(attemptId, runDate, {
       name: "라온피부과의원", host: "raon-derm.test", phone: "0212345678", sigungu: "강남구",
     });
@@ -410,7 +421,7 @@ describe("멱등성", () => {
 
 describe("❗ 설정 누락은 조용히 넘어가지 않는다", () => {
   it("HttpClient 없이 실행하면 configuration_error 로 실패한다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-09-04");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(4));
     const ctx: StageContext = {
       sql: db.owner, runId, attemptId, runDate, settings: {}, logger: nullLogger, adapters: [],
     };

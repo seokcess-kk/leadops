@@ -15,6 +15,17 @@ import type { StageContext } from "./types";
 
 let db: TestDb;
 
+/**
+ * 오늘(UTC) 기준 상대 날짜. 파티션 창(현재 달 ~ +2개월)은 테스트 실행 시각 기준이므로
+ * 관측을 남기는 테스트의 고정 절대 날짜는 달력에 따라 창 밖으로 밀려난다 —
+ * packages/db/src/fixtures.ts 의 `createRun` 동적 기본값과 같은 이유다.
+ */
+function relativeDate(daysFromToday: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromToday);
+  return d.toISOString().slice(0, 10);
+}
+
 const SETTINGS = {
   scoring: {
     mode: "ors_disabled",
@@ -157,7 +168,7 @@ afterAll(async () => {
 
 describe("competitor_select — 검색이 아니라 매칭으로 고른다", () => {
   it("업종·지역·규모가 가까운 업체를 고른다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-01");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(1));
     const dong = "선정동";
     const target = await seed(attemptId, runDate, { ...TARGET, dong });
     await seed(attemptId, runDate, { name: "가까운피부과의원", sigungu: "강남구", dong });
@@ -178,7 +189,7 @@ describe("competitor_select — 검색이 아니라 매칭으로 고른다", () 
   });
 
   it("❗ 같은 네트워크(group_id)는 경쟁사가 아니다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-02");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(2));
     const [group] = await db.owner<{ id: string }[]>`
       insert into company_groups (group_key, kind, display_name)
       values (${`g-${Math.random()}`}, 'corporation', '같은법인') returning id
@@ -197,7 +208,7 @@ describe("competitor_select — 검색이 아니라 매칭으로 고른다", () 
   });
 
   it("제외된 업체·수신거부 업체는 경쟁사 후보가 아니다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-03");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(3));
     const dong = "제외동";
     const target = await seed(attemptId, runDate, { ...TARGET, dong });
     await seed(attemptId, runDate, { name: "폐업피부과의원", excluded: true, dong });
@@ -216,7 +227,7 @@ describe("competitor_select — 검색이 아니라 매칭으로 고른다", () 
   });
 
   it("멱등하다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-04");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(4));
     await seed(attemptId, runDate, { ...TARGET, dong: "멱등동" });
     await seed(attemptId, runDate, { name: "peer1피부과의원", dong: "멱등동" });
     const ctx = ctxFor(runId, attemptId, runDate);
@@ -236,7 +247,7 @@ describe("competitor_select — 검색이 아니라 매칭으로 고른다", () 
 
 describe("competitor_analyze — 분석되지 않은 경쟁사는 무효다", () => {
   it("❗ 미분석 경쟁사를 0 으로 채우지 않고 is_valid=false 로 둔다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-10");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(5));
     const dong = "미분석동";
     const target = await seed(attemptId, runDate, { ...TARGET, dong });
     await seed(attemptId, runDate, { name: "미분석피부과의원", official: null, posts: null, dong });
@@ -255,7 +266,7 @@ describe("competitor_analyze — 분석되지 않은 경쟁사는 무효다", ()
   });
 
   it("분석된 경쟁사는 지표와 함께 유효해진다", async () => {
-    const { runId, attemptId, runDate } = await createRun(db, "2026-08-11");
+    const { runId, attemptId, runDate } = await createRun(db, relativeDate(6));
     const dong = "활발동";
     const target = await seed(attemptId, runDate, { ...TARGET, dong });
     await seed(attemptId, runDate, { ...ACTIVE_PEER("활발한피부과의원"), dong });
@@ -284,7 +295,7 @@ describe("score — 3축 점수와 게이트", () => {
   let target: string;
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-08-20");
+    const run = await createRun(db, relativeDate(7));
     runId = run.runId;
     attemptId = run.attemptId;
     runDate = run.runDate;
@@ -359,7 +370,7 @@ describe("score — 3축 점수와 게이트", () => {
   });
 
   it("홈페이지 관측이 없는 업체는 채점 대상이 아니다", async () => {
-    const run = await createRun(db, "2026-08-21");
+    const run = await createRun(db, relativeDate(8));
     await seed(run.attemptId, run.runDate, { name: "홈페이지없는의원", official: null, posts: null, dong: "무홈페이지동" });
     const result = await scoreStage.run(ctxFor(run.runId, run.attemptId, run.runDate), {});
     expect(result.skipped["no_website_observation"]).toBe(1);
@@ -378,7 +389,7 @@ describe("recommend · shortlist", () => {
   let runDate: string;
 
   beforeAll(async () => {
-    const run = await createRun(db, "2026-08-30");
+    const run = await createRun(db, relativeDate(9));
     runId = run.runId;
     attemptId = run.attemptId;
     runDate = run.runDate;
@@ -434,7 +445,7 @@ describe("recommend · shortlist", () => {
   });
 
   it("❗ 업종 쿼터가 검수 후보에도 적용된다", async () => {
-    const run = await createRun(db, "2026-09-05");
+    const run = await createRun(db, relativeDate(10));
     const dong = "쿼터동";
     await seed(run.attemptId, run.runDate, { ...TARGET, name: "쿼터1피부과의원", dong });
     await seed(run.attemptId, run.runDate, { ...TARGET, name: "쿼터2피부과의원", dong });
