@@ -28,6 +28,13 @@ import { Session } from "./session";
 export interface ApiOptions {
   sql: Sql;
   jwtSecret: string;
+  /**
+   * Supabase 사용자 토큰(ES256) 검증용 공개키 — 프로젝트 JWKS 의 키 JSON 문자열.
+   *
+   * ❗ 없으면 ES256 토큰이 전부 401 이다 (Supabase 실로그인 불가, dev HS256 경로만 동작).
+   *    조용히 열리는 방향의 실패가 아니므로 부팅은 막지 않는다.
+   */
+  jwtPublicJwk?: string | undefined;
   logger: Logger;
   /** 테스트에서 DNS 를 대체한다. 지정하지 않으면 실제 DNS 를 쓴다. */
   resolver?: MxResolver | undefined;
@@ -118,7 +125,10 @@ export function createApi(options: ApiOptions): Server {
         }
 
         // ── 인증 (라우팅보다 먼저) ──
-        const claims = verifyJwt(bearerToken(req.headers.authorization), options.jwtSecret);
+        const claims = verifyJwt(bearerToken(req.headers.authorization), {
+          hs256Secret: options.jwtSecret,
+          es256PublicJwk: options.jwtPublicJwk,
+        });
 
         const hit = resolveRoute(req.method ?? "GET", pathname);
         if (!hit) {

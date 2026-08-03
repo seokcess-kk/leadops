@@ -41,6 +41,7 @@ update public.profiles set role = 'admin' where email = '<운영자 이메일>';
 | `WORKER_DATABASE_URL` | 워커 (`leadops_worker` 역할) | 부팅 실패 |
 | `LEADOPS_API_URL` | taimen → API | `127.0.0.1:8792` 로 가정 |
 | `SUPABASE_URL` · `SUPABASE_ANON_KEY` | taimen 서버 (Supabase Auth 로그인·세션) | Supabase 로그인 경로 비활성 — dev login 또는 401 |
+| `SUPABASE_JWT_PUBLIC_JWK` | 검수 API — Supabase 사용자 토큰(ES256) 공개키. `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` 의 키 JSON 한 줄 | ES256 토큰 전부 401 (Supabase 실로그인 불가 — dev HS256 경로만 동작) |
 
 > ❗ `INTERNAL_TRIGGER_SECRET` 은 pg_cron 쪽 `private_config.trigger_secret` 과 **같은 값**이어야
 > 한다. 한쪽만 바꾸면 매일 06:00 에 401 이 나고, 그 사실은 **다음날 리드가 0 건일 때** 알게 된다.

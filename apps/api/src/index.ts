@@ -11,7 +11,9 @@ import { createApi } from "./server";
  *
  * 환경변수:
  *   API_DATABASE_URL         권한 있는 DSN (필수)
- *   SUPABASE_JWT_SECRET      Supabase 프로젝트의 JWT Secret (필수)
+ *   SUPABASE_JWT_SECRET      Supabase 프로젝트의 JWT Secret (필수 — dev login·E2E 의 HS256 경로)
+ *   SUPABASE_JWT_PUBLIC_JWK  Supabase 사용자 토큰(ES256) 공개키 — JWKS 의 키 JSON 한 줄.
+ *                            없으면 ES256 토큰이 전부 401 (Supabase 실로그인 불가).
  *   API_PORT                 기본 8787
  *   INTERNAL_TRIGGER_SECRET  pg_cron → `POST /internal/run` 서명 비밀 (32자 이상)
  *                            없으면 그 경로가 비활성이다 (401). 조용히 열리지 않는다.
@@ -34,6 +36,15 @@ async function main(): Promise<void> {
   const jwtSecret = required("SUPABASE_JWT_SECRET", "Supabase 대시보드 → Settings → API → JWT Secret");
   const port = Number(process.env["API_PORT"] ?? 8787);
 
+  const jwtPublicJwk = process.env["SUPABASE_JWT_PUBLIC_JWK"];
+  if (!jwtPublicJwk) {
+    // 부팅을 막지 않는다 — 로컬 dev·E2E 는 HS256 만 쓴다. 다만 Supabase 실로그인이
+    // 필요한 구성에서 이 경고를 놓치면 모든 사용자 요청이 401 이므로, 로그에 남긴다.
+    logger.warn("jwt.es256_disabled", {
+      note: "SUPABASE_JWT_PUBLIC_JWK 이 없어 ES256 사용자 토큰을 전부 거절합니다 (JWKS: <SUPABASE_URL>/auth/v1/.well-known/jwks.json).",
+    });
+  }
+
   const internalSecret = process.env["INTERNAL_TRIGGER_SECRET"];
   if (!internalSecret) {
     // 부팅을 막지 않는다 — 스케줄러 없이 검수만 운영하는 구성이 정당하다. 다만 조용히
@@ -44,7 +55,7 @@ async function main(): Promise<void> {
   }
 
   const sql = postgres(dsn, { max: 8, onnotice: () => {} });
-  const server = createApi({ sql, jwtSecret, logger, internalSecret });
+  const server = createApi({ sql, jwtSecret, jwtPublicJwk, logger, internalSecret });
 
   const shutdown = (signal: string): void => {
     logger.info("api.shutdown", { signal });
