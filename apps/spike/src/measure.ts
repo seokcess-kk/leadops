@@ -197,6 +197,14 @@ export interface SystemVerdict {
   contactPaths: string[];
   /** ORS 를 산출했나 (분모 > 0 인 집계가 있나). */
   orsComputed: boolean;
+  /**
+   * 업체 수준 ORS — **비브랜드 키워드 집계의 최대값**. M7 의 라벨(비브랜드 통합검색
+   * 체감 노출)과 같은 표면을 재기 위한 정의다: 통합검색은 채널 중 최고 성과가 보이는
+   * 구조라 max 가 체감과 대응하고, 전 행 중앙값은 희소 노출에서 전부 0 으로 퇴화해
+   * 상관 자체가 계산되지 않는다 (2026-08-03 실측로 확인). FEATURE_ORS=off 로 돌았으면
+   * 집계에 점유율이 없어 null 이다.
+   */
+  companyOrs: number | null;
   /** 유효 경쟁사 수. */
   validCompetitors: number;
   /** 우리가 최종 검수 후보로 올렸나. */
@@ -224,6 +232,7 @@ export async function loadSystemVerdicts(
     official_judged: boolean | null;
     contact_paths: string[] | null;
     ors_computed: boolean;
+    company_ors: number | null;
     valid_competitors: number;
     shortlisted: boolean;
   }>>`
@@ -249,6 +258,11 @@ export async function loadSystemVerdicts(
              where w.company_id = s.company_id) as contact_paths,
            exists (select 1 from search_aggregates sa
                     where sa.company_id = s.company_id and sa.denominator > 0) as ors_computed,
+           -- 업체 수준 ORS: 비브랜드 최대 점유율 (SystemVerdict.companyOrs 주석 참고)
+           (select max(sa.ors)::float8
+              from search_aggregates sa
+             where sa.company_id = s.company_id and sa.denominator > 0
+               and sa.keyword_kind = 'nonbrand' and sa.ors is not null) as company_ors,
            (select count(*)::int from competitors c
              where c.company_id = s.company_id and c.is_valid) as valid_competitors,
            exists (select 1 from review_items ri where ri.company_id = s.company_id) as shortlisted
@@ -262,6 +276,7 @@ export async function loadSystemVerdicts(
       officialJudged: row.official_judged,
       contactPaths: row.contact_paths ?? [],
       orsComputed: row.ors_computed,
+      companyOrs: row.company_ors,
       validCompetitors: row.valid_competitors,
       shortlisted: row.shortlisted,
     });
@@ -433,35 +448,50 @@ export function computeMetrics(
   //
   // ❗ ORS 를 산출하지 못한 업체는 쌍에서 뺀다. 0 으로 채우면 "노출이 없다" 가 되어
   //    상관을 인위적으로 만들어 낸다.
-  const m7Pairs = rows
+  //
+  // 실측 ORS(FEATURE_ORS=shadow 이상)가 있으면 그것을 쓴다 — 판정에 쓸 수 있는 유일한
+  // 모드다. 집계에 점유율이 전혀 없으면(off 로 돌았음) 유효 경쟁사 수를 대리값으로
+  // 쓰되 주의 표시를 붙여 판정에서 제외한다 (docs/08 §3).
+  const exposurePairs = rows
     .map((r) => ({ exposure: likert(r.labelPerceivedExposure), v: sys(r) }))
-    .filter((p): p is { exposure: number; v: SystemVerdict } => p.exposure !== null && p.v !== undefined && p.v.orsComputed);
+    .filter((p): p is { exposure: number; v: SystemVerdict } => p.exposure !== null && p.v !== undefined);
   labelled["perceived_exposure"] = rows.filter((r) => likert(r.labelPerceivedExposure) !== null).length;
-  if (m7Pairs.length < 3) {
-    metrics.push(
-      unmeasured(
-        "M7",
-        "ORS ↔ 체감 노출 ρ",
-        m7Pairs.length === 0
-          ? "label_perceived_exposure 가 비어 있거나 ORS 산출 표본이 없습니다"
-          : `쌍이 ${m7Pairs.length}개뿐입니다 (n≥3 필요)`,
-        "CI 상한 < 0.4 → stop",
-      ),
-    );
-  } else {
-    // ORS 대리값: 유효 경쟁사 수가 아니라 실제 ORS 가 필요하다 → 아래 주석 참고.
+  const m7Real = exposurePairs.filter((p): p is { exposure: number; v: SystemVerdict & { companyOrs: number } } => p.v.companyOrs !== null);
+  const m7Proxy = exposurePairs.filter((p) => p.v.orsComputed);
+  if (m7Real.length >= 3) {
     metrics.push({
       id: "M7",
       label: "ORS ↔ 체감 노출 ρ",
       threshold: "CI 상한 < 0.4 → stop",
       correlation: spearman(
-        m7Pairs.map((p) => p.exposure),
-        m7Pairs.map((p) => p.v.validCompetitors),
+        m7Real.map((p) => p.exposure),
+        m7Real.map((p) => p.v.companyOrs),
+      ),
+    });
+  } else if (m7Proxy.length >= 3) {
+    metrics.push({
+      id: "M7",
+      label: "ORS ↔ 체감 노출 ρ",
+      threshold: "CI 상한 < 0.4 → stop",
+      correlation: spearman(
+        m7Proxy.map((p) => p.exposure),
+        m7Proxy.map((p) => p.v.validCompetitors),
       ),
       unmeasured:
-        "⚠️ 현재 ORS 값 대신 유효 경쟁사 수를 대리값으로 쓴다 — FEATURE_ORS=off 라 " +
-        "search_aggregates 에 점유율이 없다. ORS 를 켜기 전에는 M7 을 판정에 쓸 수 없다.",
+        "⚠️ 현재 ORS 값 대신 유효 경쟁사 수를 대리값으로 쓴다 — 집계에 점유율이 없다 " +
+        "(FEATURE_ORS=off 실행). ORS 를 켜기 전에는 M7 을 판정에 쓸 수 없다.",
     });
+  } else {
+    metrics.push(
+      unmeasured(
+        "M7",
+        "ORS ↔ 체감 노출 ρ",
+        exposurePairs.length === 0
+          ? "label_perceived_exposure 가 비어 있거나 ORS 산출 표본이 없습니다"
+          : `쌍이 ${Math.max(m7Real.length, m7Proxy.length)}개뿐입니다 (n≥3 필요)`,
+        "CI 상한 < 0.4 → stop",
+      ),
+    );
   }
 
   // ── M8 경쟁사 선정 타당성 (1~5 평균) ──
@@ -529,10 +559,14 @@ export function decideVerdict(metrics: readonly Metric[]): { verdict: Verdict; r
   const reasons: string[] = [];
 
   const m3bUsable = m3b?.proportion?.point !== null && m3b?.proportion !== undefined && m3b.unmeasured === undefined;
+  const m7Degenerate = m7?.correlation !== undefined && m7.correlation.rho === null;
   const m7Usable = m7?.correlation?.high !== null && m7?.correlation !== undefined && m7.unmeasured === undefined;
 
   if (!m3bUsable) reasons.push(`M3b 를 쓸 수 없습니다 — ${m3b?.unmeasured ?? "라벨 없음"}`);
-  if (!m7Usable) reasons.push(`M7 을 쓸 수 없습니다 — ${m7?.unmeasured ?? "라벨 없음"}`);
+  if (!m7Usable)
+    reasons.push(
+      `M7 을 쓸 수 없습니다 — ${m7?.unmeasured ?? (m7Degenerate ? "상관을 계산할 수 없습니다 (한쪽 값이 전부 동순위 — 분산 없음)" : "라벨 없음")}`,
+    );
   if (!m3bUsable || !m7Usable) {
     reasons.push("게이트 입력이 없으면 inconclusive 도 낼 수 없습니다. 라벨을 채운 뒤 다시 측정하세요.");
     return { verdict: "미판정", reasons };
