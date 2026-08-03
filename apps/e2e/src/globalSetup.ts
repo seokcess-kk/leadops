@@ -66,7 +66,8 @@ export default async function globalSetup(): Promise<void> {
       ...shared,
       NEXT_PUBLIC_LEADOPS_DATA_SOURCE: "api",
       LEADOPS_API_URL: `http://127.0.0.1:${API_PORT}`,
-      // ⚠️ 인증의 자리표시자다. Supabase Auth 가 붙으면 이 두 값은 사라진다.
+      // ⚠️ 개발·E2E 전용 인증 경로다. Supabase Auth(2026-07-31) 도입 때 삭제 대신 유지하기로
+      //    결정 — E2E 가 실 Supabase 에 의존하지 않기 위한 격리 경로 (token.ts 참조).
       LEADOPS_DEV_LOGIN: "1",
       LEADOPS_DEV_USER_ID: reviewerId,
     },

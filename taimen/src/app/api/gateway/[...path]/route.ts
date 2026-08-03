@@ -8,7 +8,7 @@ import { AuthUnavailableError, apiBaseUrl, sessionToken } from "@/lib/server/tok
  *  1. **토큰이 브라우저에 내려가지 않는다.** 토큰을 클라이언트에 두면 XSS 하나로
  *     검수 권한이 유출된다. 여기서만 붙인다.
  *  2. CORS 가 필요 없다 — 브라우저에서 보면 같은 출처다.
- *  3. 나중에 Supabase Auth 를 붙일 때 바꿀 곳이 이 파일 하나다.
+ *  3. Supabase Auth(2026-07-31) 연동 시 실제 변경 지점은 token.ts 하나였다 — 이 프록시는 무변경.
  *
  * ❗ 경로를 그대로 넘기지 않고 **허용 목록**으로 좁힌다. 열어 두면 이 프록시가
  *    API 의 모든 엔드포인트에 대한 무인증 통로가 된다.
@@ -67,7 +67,7 @@ async function forward(req: Request, segments: string[]): Promise<Response> {
 
   let token: string;
   try {
-    token = sessionToken();
+    token = await sessionToken();
   } catch (err) {
     if (err instanceof AuthUnavailableError) {
       return json(401, { error: { code: "auth_unavailable", message: err.message } });
