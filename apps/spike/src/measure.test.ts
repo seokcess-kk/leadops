@@ -144,6 +144,7 @@ const verdict = (over: Partial<SystemVerdict> = {}): SystemVerdict => ({
   officialJudged: null,
   contactPaths: [],
   orsComputed: false,
+  companyOrs: null,
   validCompetitors: 0,
   shortlisted: false,
   ...over,
@@ -350,6 +351,59 @@ describe("computeMetrics — M7", () => {
     );
     const { metrics } = computeMetrics(rows, verdicts);
     expect(metric(metrics, "M7").unmeasured).toBeDefined();
+  });
+
+  it("실측 ORS(shadow)가 있으면 그것을 쓰고 주의 표시가 없다 — 판정에 쓸 수 있다", () => {
+    const rows = [
+      row("a", { labelPerceivedExposure: "5" }),
+      row("b", { labelPerceivedExposure: "3" }),
+      row("c", { labelPerceivedExposure: "1" }),
+    ];
+    const verdicts = new Map<string, SystemVerdict>([
+      [verdictKey("hira", "a"), verdict({ orsComputed: true, companyOrs: 0.3 })],
+      [verdictKey("hira", "b"), verdict({ orsComputed: true, companyOrs: 0.1 })],
+      [verdictKey("hira", "c"), verdict({ orsComputed: true, companyOrs: 0.0 })],
+    ]);
+    const { metrics } = computeMetrics(rows, verdicts);
+    const m7 = metric(metrics, "M7");
+    expect(m7.unmeasured).toBeUndefined();
+    expect(m7.correlation?.n).toBe(3);
+    expect(m7.correlation?.rho).toBeCloseTo(1);
+  });
+
+  it("❗ 실측 ORS 가 없는 업체는 실측 쌍에서 뺀다 — 대리값과 섞지 않는다", () => {
+    const rows = [
+      row("a", { labelPerceivedExposure: "5" }),
+      row("b", { labelPerceivedExposure: "3" }),
+      row("c", { labelPerceivedExposure: "1" }),
+      row("d", { labelPerceivedExposure: "2" }),
+    ];
+    const verdicts = new Map<string, SystemVerdict>([
+      [verdictKey("hira", "a"), verdict({ orsComputed: true, companyOrs: 0.3 })],
+      [verdictKey("hira", "b"), verdict({ orsComputed: true, companyOrs: 0.1 })],
+      [verdictKey("hira", "c"), verdict({ orsComputed: true, companyOrs: 0.0 })],
+      [verdictKey("hira", "d"), verdict({ orsComputed: true, companyOrs: null, validCompetitors: 9 })], // off 시절 집계만 있음
+    ]);
+    const { metrics } = computeMetrics(rows, verdicts);
+    expect(metric(metrics, "M7").correlation?.n).toBe(3);
+    expect(metric(metrics, "M7").unmeasured).toBeUndefined();
+  });
+
+  it("실측 ORS 쌍이 3개 미만이고 대리값 쌍이 3개 이상이면 대리값 + 주의 표시로 낸다", () => {
+    const rows = [
+      row("a", { labelPerceivedExposure: "5" }),
+      row("b", { labelPerceivedExposure: "3" }),
+      row("c", { labelPerceivedExposure: "1" }),
+    ];
+    const verdicts = new Map<string, SystemVerdict>([
+      [verdictKey("hira", "a"), verdict({ orsComputed: true, companyOrs: 0.3, validCompetitors: 5 })],
+      [verdictKey("hira", "b"), verdict({ orsComputed: true, validCompetitors: 3 })],
+      [verdictKey("hira", "c"), verdict({ orsComputed: true, validCompetitors: 1 })],
+    ]);
+    const { metrics } = computeMetrics(rows, verdicts);
+    const m7 = metric(metrics, "M7");
+    expect(m7.correlation?.n).toBe(3);
+    expect(m7.unmeasured).toMatch(/대리값/);
   });
 });
 
