@@ -102,3 +102,19 @@ sessionToken() (token.ts 개편 · async 로 변경)
 - taimen·API 의 실서버 배포 (VPS·호스팅 — 배포 트랙 별도)
 - 비밀번호 재설정 셀프서비스 (대시보드에서 관리자가 처리 — 소수 인원)
 - MFA · OAuth 소셜 로그인
+
+## 부기 — 스테이징 검증 결과 (2026-08-03)
+
+"확인된 전제"의 **legacy HS256 판단은 사용자 토큰에는 성립하지 않았다.** anon key 는
+legacy 형식이지만 이 프로젝트는 JWT signing keys 체계라 사용자 access token 을
+**ES256**(P-256, JWKS 공개)으로 서명한다 — 이 문서가 예고한 재확증 게이트가 스테이징
+관통 검증에서 이를 잡아냈다 (전 게이트웨이 요청 401 로 발현).
+
+대응(발주자 승인): 검수 API `jwt.ts` 에 ES256 검증을 추가했다 — alg 허용 목록
+(HS256=공유 시크릿·dev/E2E, ES256=`SUPABASE_JWT_PUBLIC_JWK` 정적 주입 공개키),
+alg 마다 고정 키 하나라 혼동 공격이 성립하지 않는다. "검수 API 무변경" 항목은 이
+결정으로 대체된다.
+
+관통 확인: 실로그인 → `/today` → 사이드바 실계정·admin 표시 → 게이트웨이 경유
+검수 API 전 라우트 200 (`/api/me`·leads·review·settings·runs·costs) → 로그아웃
+리다이렉트. profiles 자동 생성·admin 승격(런북 1.2)도 실환경에서 확인.
