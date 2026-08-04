@@ -9,9 +9,9 @@ import { AdapterNotConfiguredError } from "./types";
  *    약관상 허용되는지 확인되지 않았다(R2). `FEATURE_ORS` 3-state 와 `source_registry` 의
  *    서면 근거(`written_approval_ref`)가 둘 다 충족돼야 어댑터가 만들어진다.
  *
- * ⚠️ 이 어댑터는 **실 API 로 검증되지 않았다** (`verifiedAgainstLiveApi = false`).
- *    자격증명이 없어 응답 형태를 실측하지 못했다. 필드명은 네이버 개발자 문서를 근거로
- *    작성했고, 키가 생기면 `pnpm spike verify` 로 확인한 뒤 플래그를 바꾼다.
+ * ✅ legacy 변형은 **실 API 응답으로 검증됐다** (2026-07-31 · `pnpm spike verify` —
+ *    4채널 fixture 녹화, `verifiedAgainstLiveApi = true`). API HUB 변형(R2-04)은
+ *    미검증이라 생성자가 거부한다.
  */
 
 /** ORS 산출에 쓰는 채널 4종. `local` 은 ORS 에서 제외한다(설계서 3절). */
