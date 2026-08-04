@@ -35,6 +35,8 @@ interface Site {
   robots?: string;
   robotsStatus?: number;
   html?: string;
+  /** 경로별 페이지. 없으면 모든 경로가 `html` 을 받는다. */
+  pages?: Record<string, string>;
 }
 
 const SITES: Record<string, Site> = {
@@ -47,6 +49,25 @@ const SITES: Record<string, Site> = {
   "shell.test": { robotsStatus: 404, html: `<html><head><title>준비중</title></head><body>준비중</body></html>` },
   // 애그리게이터 도메인 — 가져올 수는 있어도 공식 홈페이지가 아니다
   "place.naver.com": { robotsStatus: 404, html: FULL_HTML },
+  // Crawl-delay 가 상한(30s)을 훨씬 넘는다 — 실측: 600·3600 이 판정을 통째로 막았다
+  "slowcrawl.test": { robots: "User-agent: *\nAllow: /\nCrawl-delay: 3600\n", html: FULL_HTML },
+  // JS 리다이렉트 껍데기 — 홈은 이동 스크립트뿐이고 실내용은 /index.php 에 있다 (골드셋 FN 실사례)
+  "jsshell.test": {
+    robotsStatus: 404,
+    html: `<html><head><title>이동중</title><script>
+      if (navigator.userAgent.match(/iPhone|Android/) != null) {
+        location.href = "/m/";
+      } else {
+        location.href = "/index.php";
+      }
+    </script></head></html>`,
+    pages: { "/index.php": FULL_HTML },
+  },
+  // 다른 출처로의 이동은 따라가지 않는다
+  "crossshell.test": {
+    robotsStatus: 404,
+    html: `<html><head><title>이동중</title><script>location.href = "http://raon-derm.test/";</script></head></html>`,
+  },
   // 공식이지만 연락처 페이지 링크가 없다
   "nolink.test": {
     robotsStatus: 404,
@@ -82,7 +103,8 @@ beforeAll(async () => {
       res.writeHead(200, { "content-type": "text/plain" }).end(site.robots ?? "");
       return;
     }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(site.html ?? "");
+    const page = site.pages?.[req.url ?? ""];
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(page ?? site.html ?? "");
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -182,9 +204,16 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
       name: "맑은치과의원", host: "nolink.test", phone: "0517778888", sigungu: "해운대구", industry: "dental",
     });
     ids["nosite"] = await seed(attemptId, runDate, { name: "홈페이지없는의원", host: null });
+    ids["slowcrawl"] = await seed(attemptId, runDate, {
+      name: "라온피부과의원", host: "slowcrawl.test", phone: "0212345678", sigungu: "강남구",
+    });
+    ids["jsshell"] = await seed(attemptId, runDate, {
+      name: "라온피부과의원", host: "jsshell.test", phone: "0212345678", sigungu: "강남구",
+    });
+    ids["crossshell"] = await seed(attemptId, runDate, { name: "교차셸의원", host: "crossshell.test" });
 
     const result = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
-    expect(result.processed).toBe(6);
+    expect(result.processed).toBe(9);
   }, 60_000);
 
   const observationOf = async (key: string) => {
@@ -227,6 +256,30 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
     expect(row.official_status).toBe("unavailable");
     expect(row.robots_allowed).toBe(false);
     expect(row.signals["reason"]).toBe("robots_fetch_error");
+  });
+
+  it("❗ Crawl-delay 가 상한을 넘어도 포기하지 않는다 — 단일 요청은 위반할 간격이 없다", async () => {
+    // Crawl-delay 는 연속 요청의 간격이다. 이 스테이지는 이 호스트에 콘텐츠 요청을
+    // 한 번만 보내므로, 아무리 긴 delay 도 위반할 간격 자체가 생기지 않는다.
+    const row = await observationOf("slowcrawl");
+    expect(row.official_status).toBe("confirmed");
+    expect(row.robots_allowed).toBe(true);
+    expect(row.http_status).toBe(200);
+    expect(row.crawled_pages).toBe(1);
+  });
+
+  it("❗ JS 리다이렉트 껍데기는 같은 출처 목적지를 한 번 따라가 판정한다", async () => {
+    // 홈이 이동 스크립트뿐이면 껍데기를 채점하는 것이 아니라 실내용을 봐야 한다.
+    const row = await observationOf("jsshell");
+    expect(row.official_status).toBe("confirmed");
+    expect(row.crawled_pages).toBe(2);
+    expect(row.signals["phoneMatch"]).toBe(true);
+  });
+
+  it("❗ 다른 출처로의 이동은 따라가지 않는다", async () => {
+    const row = await observationOf("crossshell");
+    expect(row.official_status).toBe("uncertain");
+    expect(row.crawled_pages).toBe(1);
   });
 
   it("robots.txt 가 404 면 가져온다 (표준 동작)", async () => {

@@ -155,6 +155,64 @@ describe("homepage_discover", () => {
     expect(rows[0]?.discovery_source).toBeNull();
   });
 
+  it("❗ 죽은 후보만 있는 업체는 다시 발견 대상이 된다 (낡은 hospUrl 이 발견을 막지 않는다)", async () => {
+    // 골드셋 FN 실사례: HIRA 의 hospUrl 이 NXDOMAIN 인데(goun-skin.co.kr) 진짜 사이트는
+    // 다른 도메인에 있었다. "URL 이 있다" 는 이유로 발견을 건너뛰면 이 업체는 영원히
+    // unavailable 에 머문다.
+    const id = await company({ name: "죽은주소피부과의원", phone: "02-222-9999" });
+    const [w] = await db.owner<Array<{ id: string }>>`
+      insert into websites (company_id, canonical_url, domain)
+      values (${id}, 'https://dead-hospurl.kr', 'dead-hospurl.kr')
+      returning id
+    `;
+    await db.owner`
+      insert into website_observations (website_id, attempt_id, run_date, official_status, signals)
+      values (${w!.id}, ${attemptId}, ${runDate}::date, 'unavailable', '{"reason":"fetch_error"}')
+    `;
+    await homepageDiscoverStage.run(
+      ctx(
+        stubAdapter({
+          "강남구 죽은주소피부과의원": [
+            hit({ title: "죽은주소피부과의원", telephone: "02-222-9999", link: "https://alive-new.kr" }),
+          ],
+        }),
+      ),
+      {},
+    );
+    const rows = await websitesOf(id);
+    // ❗ 기존 행은 남고 후보가 추가된다 — 공공 API 가 준 값을 덮지 않는다.
+    expect(rows.map((r) => r.canonical_url).sort()).toEqual([
+      "https://alive-new.kr",
+      "https://dead-hospurl.kr",
+    ]);
+  });
+
+  it("살아있는 관측(uncertain 포함)이 있으면 발견하지 않는다", async () => {
+    // uncertain 은 "도달했으나 증거가 없다" 다 — 평가할 실페이지가 있으므로 검색으로
+    // 다른 후보를 덧붙이지 않는다 (검색 결과가 판정을 앞지르는 것을 막는다).
+    const id = await company({ name: "불확실피부과의원", phone: "02-444-9999" });
+    const [w] = await db.owner<Array<{ id: string }>>`
+      insert into websites (company_id, canonical_url, domain)
+      values (${id}, 'https://live-uncertain.kr', 'live-uncertain.kr')
+      returning id
+    `;
+    await db.owner`
+      insert into website_observations (website_id, attempt_id, run_date, official_status, signals)
+      values (${w!.id}, ${attemptId}, ${runDate}::date, 'uncertain', '{}')
+    `;
+    await homepageDiscoverStage.run(
+      ctx(
+        stubAdapter({
+          "강남구 불확실피부과의원": [
+            hit({ title: "불확실피부과의원", telephone: "02-444-9999", link: "https://should-not-add.kr" }),
+          ],
+        }),
+      ),
+      {},
+    );
+    await expect(websitesOf(id)).resolves.toHaveLength(1);
+  });
+
   it("두 번 실행해도 같은 결과다 (멱등)", async () => {
     const id = await company({ name: "멱등피부과의원", phone: "02-777-1234" });
     const adapter = stubAdapter({

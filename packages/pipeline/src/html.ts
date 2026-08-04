@@ -59,12 +59,49 @@ export interface PageScan {
    * 비교 전에 양쪽을 NFKC 정규화하고 공백을 제거한 뒤 소문자로 맞춘다.
    */
   readonly contains: (needle: string) => boolean;
+  /**
+   * 껍데기 리다이렉트 페이지의 이동 목적지 (있을 때만).
+   *
+   * `<meta http-equiv="refresh">` 또는 인라인 스크립트의 리터럴 `location` 대입에서
+   * 뽑는다. **내비게이션 목적지 URL 하나뿐이다** — 스크립트 안의 내용이 링크·전화
+   * 신호가 되지 않는다는 격리 규칙은 그대로다 (links·digits·textLength 에 영향 없음).
+   * 추적 여부·같은 출처 검증·robots 재확인은 호출자(homepage 스테이지)의 몫이다.
+   */
+  readonly redirectTarget?: string | undefined;
 }
 
 const foldForMatch = (s: string): string =>
   s.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 
 const collapse = (s: string): string => s.replace(/\s+/g, " ").trim();
+
+/**
+ * 리터럴 `location` 대입 (`location.href = "..."` · `location.replace("...")`).
+ * 변수·연산 대입은 잡지 않는다 — JS 를 실행하지 않으므로 리터럴만 신뢰할 수 있다.
+ */
+const LOCATION_ASSIGN =
+  /(?:(?:window|document|top|self)\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']|location\.replace\(\s*["']([^"']+)["']\s*\)/g;
+
+/**
+ * 껍데기 리다이렉트 목적지를 뽑는다.
+ *
+ * meta refresh 가 스크립트 이동보다 우선한다 (선언적이라 신뢰도가 높다). 스크립트는
+ * UA 분기(모바일 먼저, 데스크톱 나중이 관행)를 평가할 수 없으므로 **마지막 대입**을
+ * 취한다. 원문 전체를 정규식으로 보지만, 결과는 URL 문자열 하나라 본문이 새지 않는다.
+ */
+function extractRedirectTarget(
+  metas: readonly { equiv: string; content: string }[],
+  rawHtml: string,
+): string | undefined {
+  for (const meta of metas) {
+    if (meta.equiv !== "refresh") continue;
+    const m = /url\s*=\s*['"]?([^'";\s]+)/i.exec(meta.content);
+    if (m?.[1]) return m[1];
+  }
+  let last: string | undefined;
+  for (const m of rawHtml.matchAll(LOCATION_ASSIGN)) last = m[1] ?? m[2] ?? last;
+  return last;
+}
 
 /**
  * HTML 을 판별 신호로 축약한다.
@@ -83,10 +120,14 @@ export function scanHtml(html: string): PageScan {
   let description: string | undefined;
   let hasNoindex = false;
 
+  const equivMetas: Array<{ equiv: string; content: string }> = [];
   for (const meta of root.querySelectorAll("meta")) {
     const key = (meta.getAttribute("property") ?? meta.getAttribute("name") ?? "").toLowerCase();
     const content = meta.getAttribute("content");
     if (!content) continue;
+
+    const equiv = (meta.getAttribute("http-equiv") ?? "").toLowerCase();
+    if (equiv) equivMetas.push({ equiv, content });
 
     if (key === "og:site_name") siteName ??= collapse(content);
     else if (key === "og:description" || key === "description") description ??= collapse(content);
@@ -133,9 +174,11 @@ export function scanHtml(html: string): PageScan {
   const title = root.querySelector("title")?.text;
   // 대조 전용 사본. 이 문자열은 클로저 밖으로 나가지 않는다.
   const folded = foldForMatch(text);
+  const redirectTarget = extractRedirectTarget(equivMetas, html);
 
   return {
     ...(title && collapse(title) ? { title: collapse(title) } : {}),
+    ...(redirectTarget ? { redirectTarget } : {}),
     ...(siteName ? { siteName } : {}),
     ...(description ? { description } : {}),
     hasNoindex,

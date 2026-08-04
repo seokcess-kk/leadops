@@ -70,6 +70,48 @@ describe("❗ script · style 격리", () => {
   });
 });
 
+describe("껍데기 리다이렉트 목적지 추출", () => {
+  it("meta refresh 의 url 을 읽는다", () => {
+    const scan = scanHtml(
+      `<html><head><meta http-equiv="refresh" content="0;url=/main/"></head></html>`,
+    );
+    expect(scan.redirectTarget).toBe("/main/");
+  });
+
+  it("인라인 스크립트의 location 이동을 읽는다 — 마지막 대입이 목적지다", () => {
+    // 실사례(골드셋 FN): UA 분기로 모바일(/m/)을 먼저, 데스크톱(/index.php)을 나중에
+    // 대입한다. JS 를 실행하지 않으므로 분기를 평가할 수 없고, 마지막 대입을 취한다.
+    const scan = scanHtml(`<html><head><script>
+      if (navigator.userAgent.match(/iPhone|Android/) != null) {
+        location.href = "/m/";
+      } else {
+        location.href = "/index.php";
+      }
+    </script></head></html>`);
+    expect(scan.redirectTarget).toBe("/index.php");
+  });
+
+  it("meta refresh 가 스크립트 이동보다 우선한다", () => {
+    const scan = scanHtml(
+      `<head><meta http-equiv="refresh" content="0; URL='/meta/'"><script>location.href = "/js/";</script></head>`,
+    );
+    expect(scan.redirectTarget).toBe("/meta/");
+  });
+
+  it("이동이 없으면 필드 자체가 없다", () => {
+    expect(scanHtml(`<html><body>본문</body></html>`).redirectTarget).toBeUndefined();
+  });
+
+  it("❗ 목적지 추출이 스크립트 격리를 깨지 않는다 — 링크·숫자 신호는 그대로다", () => {
+    const scan = scanHtml(
+      `<script>location.href = "/index.php"; var p = "0312345678";</script>`,
+    );
+    expect(scan.redirectTarget).toBe("/index.php");
+    expect(scan.links).toHaveLength(0);
+    expect(phoneAppears(scan, "0312345678")).toBe(false);
+  });
+});
+
 describe("전화번호 대조", () => {
   it("인라인 태그로 쪼개진 번호를 이어 붙여 맞춘다", () => {
     const scan = scanHtml(`<div>대표전화 <span>02</span>-<span>1234</span>-<b>5678</b></div>`);
