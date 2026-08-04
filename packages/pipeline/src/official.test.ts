@@ -180,6 +180,50 @@ describe("상호 대조의 함정", () => {
     expect(v.signals["nameInTitle"]).toBe(false);
   });
 
+  it("❗ 신고명의 '의원' 접미가 타이틀에 없어도 상호가 맞으면 발화한다", () => {
+    // 골드셋 FN 실사례: 기관명 "기장필피부과의원" · <title>기장필피부과</title>.
+    // 신고명은 종별 접미를 강제하지만 사이트는 접미 없이 상호만 쓰는 경우가 흔하다.
+    const v = judgeOfficial(
+      input(
+        { companyName: "기장필피부과의원", phone: null, regionSigungu: null },
+        `<title>기장필피부과</title><p>${"본문 ".repeat(60)}</p>`,
+      ),
+    );
+    expect(v.signals["nameInTitle"]).toBe(true);
+  });
+
+  it("'병원' 접미도 같다", () => {
+    const v = judgeOfficial(
+      input(
+        { companyName: "화이트치과병원", phone: null, regionSigungu: null },
+        `<title>화이트치과</title><p>${"본문 ".repeat(60)}</p>`,
+      ),
+    );
+    expect(v.signals["nameInTitle"]).toBe(true);
+  });
+
+  it("❗ '한의원' 은 '의원' 만 떼지 않는다 — 남는 말이 상호가 아니다", () => {
+    // "행복한의원" 은 "행복" + "한의원" 이다. "의원" 만 떼면 "행복한" 이 되어
+    // 아무 타이틀에나 맞는 수식어가 된다.
+    const v = judgeOfficial(
+      input(
+        { companyName: "행복한의원", phone: null, regionSigungu: null },
+        `<title>행복한 이야기</title><p>${"본문 ".repeat(60)}</p>`,
+      ),
+    );
+    expect(v.signals["nameInTitle"]).toBe(false);
+  });
+
+  it("접미를 뗀 나머지가 세 글자 미만이면 변형을 쓰지 않는다", () => {
+    const v = judgeOfficial(
+      input(
+        { companyName: "온정의원", phone: null, regionSigungu: null },
+        `<title>온정마을 소식</title><p>${"본문 ".repeat(60)}</p>`,
+      ),
+    );
+    expect(v.signals["nameInTitle"]).toBe(false);
+  });
+
   it("영문 상호는 도메인에서도 맞는다", () => {
     const v = judgeOfficial(
       input({

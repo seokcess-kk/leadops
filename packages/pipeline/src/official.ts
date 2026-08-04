@@ -101,6 +101,24 @@ function domainLabel(domain: string): string {
   return first.replace(/[^a-z0-9]/g, "");
 }
 
+/**
+ * 타이틀 대조용 상호 변형.
+ *
+ * 신고명은 의료법 종별 접미(…의원·…병원)를 강제하지만 `<title>` 은 접미 없이 상호만
+ * 쓰는 경우가 흔하다 ("기장필피부과의원" 의 타이틀이 "기장필피부과"). 접미를 뗀 변형을
+ * 함께 대조하되:
+ *  - "한의원" 은 통째로만 뗀다 — "의원" 만 떼면 "행복한의원" → "행복한" 처럼 상호가
+ *    아닌 수식어가 남아 아무 타이틀에나 맞는다
+ *  - 뗀 나머지가 세 글자 미만이면 우연 일치가 잦아 변형을 쓰지 않는다
+ */
+function titleNeedles(normalized: string): string[] {
+  const stripped = normalized.endsWith("한의원")
+    ? normalized.slice(0, -"한의원".length)
+    : normalized.replace(/(?:의원|병원)$/, "");
+  if (stripped === normalized || stripped.length < 3) return [normalized];
+  return [normalized, stripped];
+}
+
 export function judgeOfficial(input: OfficialInput): OfficialVerdict {
   const { scan, companyName } = input;
   const domainClass = classifyDomain(new URL(input.finalUrl).hostname);
@@ -134,7 +152,8 @@ export function judgeOfficial(input: OfficialInput): OfficialVerdict {
     [scan.title, scan.siteName, scan.description].filter(Boolean).join(" "),
   );
   // 두 글자 상호는 우연히 맞을 수 있어 신호로 쓰지 않는다.
-  const nameInTitle = normalized.length >= 3 && titleHay.includes(normalized);
+  const nameInTitle =
+    normalized.length >= 3 && titleNeedles(normalized).some((needle) => titleHay.includes(needle));
 
   const label = domainLabel(input.domain);
   const nameInDomain = label.length >= 4 && (normalized.includes(label) || label.includes(normalized));
