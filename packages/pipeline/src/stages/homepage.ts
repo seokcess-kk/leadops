@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import { discoverChannels, type DiscoveredChannel } from "../channels";
 import { detectContactPages, type ContactCandidate } from "../contactPages";
-import { scanHtml } from "../html";
-import { judgeOfficial, unavailableVerdict, type OfficialVerdict } from "../official";
+import { scanHtml, type PageScan } from "../html";
+import {
+  judgeOfficial,
+  SHELL_LINK_COUNT,
+  SHELL_TEXT_LENGTH,
+  unavailableVerdict,
+  type OfficialVerdict,
+} from "../official";
 import {
   countSkip,
   emptyResult,
@@ -27,7 +33,8 @@ import {
  *    아닌 사이트의 후보를 걷어내고 커버리지를 센다.
  *
  * ❗ 후보 페이지의 **본문은 절대 가져오지 않는다** (정보통신망법 제50조의2 · 결론 A).
- *    이 스테이지가 여는 URL 은 홈페이지 하나뿐이다.
+ *    이 스테이지가 여는 URL 은 홈페이지뿐이다 — 껍데기 리다이렉트를 한 번 따라간
+ *    목적지도 홈페이지 그 자체이지 연락처 페이지가 아니다.
  *
  * 멱등: `website_observations` 의 `unique (website_id, attempt_id)` 로 이미 처리한
  * 사이트는 다음 조회에서 빠진다. 실패해도 반드시 관측을 남기므로 루프가 멈춘다.
@@ -40,7 +47,14 @@ const CONCURRENCY = 6;
 
 const BATCH = 200;
 
-/** 이보다 긴 Crawl-delay 는 지키는 대신 건너뛴다. 한 사이트가 실행 전체를 잡아먹지 않게. */
+/**
+ * robots.txt 조회와 홈페이지 요청 사이에 지켜 줄 Crawl-delay 상한.
+ *
+ * 이보다 긴 delay 는 **기다리지도, 포기하지도 않는다.** Crawl-delay 는 연속 요청의
+ * 간격인데 이 스테이지는 이 호스트에 콘텐츠 요청을 한 번만 보내므로(홈페이지 1페이지),
+ * 아무리 긴 delay 도 위반할 간격 자체가 생기지 않는다. 실측(2026-08-04 골드셋 FN):
+ * Crawl-delay 600·3600 을 이유로 포기하면 그 업체는 영원히 unavailable 에 머문다.
+ */
 const MAX_CRAWL_DELAY_SEC = 30;
 
 interface Target {
@@ -190,21 +204,51 @@ async function inspect(
     };
   }
 
-  if (gate.crawlDelaySec !== undefined) {
-    if (gate.crawlDelaySec > MAX_CRAWL_DELAY_SEC) {
-      return {
-        ...empty,
-        robotsAllowed: true,
-        verdict: unavailableVerdict("crawl_delay_too_long", target.domain),
-      };
-    }
-    // robots.txt 를 이미 한 번 받았으므로 다음 요청까지 간격을 지킨다.
-    if (gate.crawlDelaySec > 0) await sleep(gate.crawlDelaySec * 1000);
+  // robots.txt 를 이미 한 번 받았으므로, 지킬 수 있는 범위의 delay 면 다음 요청까지
+  // 간격을 지킨다. 상한을 넘는 delay 는 기다리지 않는다 — 단일 요청은 위반할 간격이
+  // 없고, 기다리면 한 사이트가 실행 전체를 잡아먹는다 (MAX_CRAWL_DELAY_SEC 주석 참고).
+  if (
+    gate.crawlDelaySec !== undefined &&
+    gate.crawlDelaySec > 0 &&
+    gate.crawlDelaySec <= MAX_CRAWL_DELAY_SEC
+  ) {
+    await sleep(gate.crawlDelaySec * 1000);
   }
 
   try {
-    const res = await ctx.http.get(target.canonical_url, { acceptContentTypes: HTML_CONTENT_TYPES });
-    const scan = scanHtml(res.body);
+    let res = await ctx.http.get(target.canonical_url, { acceptContentTypes: HTML_CONTENT_TYPES });
+    let scan = scanHtml(res.body);
+    let crawledPages = 1;
+
+    // ── 껍데기 리다이렉트 1회 추적 ──
+    // 홈이 이동 스크립트·meta refresh 뿐이면 껍데기를 채점하는 것이 아니라 실내용을
+    // 봐야 한다 (골드셋 FN 실사례: 본문이 `location.href="/index.php"` 한 줄).
+    // 같은 출처로만, 딱 한 번만 따라간다. robots 는 목적지 경로로 다시 확인하고,
+    // 두 번째 요청이 생기므로 Crawl-delay 는 상한 내에서만 지키며 진행한다.
+    const followTo = shellRedirectDestination(scan, res.finalUrl);
+    if (
+      followTo !== undefined &&
+      (gate.crawlDelaySec === undefined || gate.crawlDelaySec <= MAX_CRAWL_DELAY_SEC)
+    ) {
+      try {
+        const destGate = await ctx.robots.check(followTo);
+        if (destGate.allowed) {
+          if (gate.crawlDelaySec !== undefined && gate.crawlDelaySec > 0) {
+            await sleep(gate.crawlDelaySec * 1000);
+          }
+          res = await ctx.http.get(followTo, { acceptContentTypes: HTML_CONTENT_TYPES });
+          scan = scanHtml(res.body);
+          crawledPages = 2;
+        }
+      } catch (err) {
+        // 추적 실패는 껍데기 첫 페이지로 판정한다 — 홈 자체는 살아 있었다.
+        ctx.logger.warn("homepage.redirect_follow_failed", {
+          websiteId: target.website_id,
+          error: message(err),
+        });
+      }
+    }
+
     const candidates = detectContactPages(scan.links, res.finalUrl);
     // 채널도 같은 링크 목록에서 나온다 — 추가 요청 0회 (설계서 4.1 쿼터 절감).
     const channels = discoverChannels(scan.links, res.finalUrl);
@@ -229,11 +273,29 @@ async function inspect(
       hasNoindex: scan.hasNoindex,
       // 변경 탐지용. 본문은 저장하지 않고 지문만 남긴다.
       contentHash: createHash("sha256").update(res.body).digest("hex").slice(0, 32),
-      crawledPages: 1,
+      crawledPages,
     };
   } catch (err) {
     ctx.logger.warn("homepage.fetch_failed", { websiteId: target.website_id, error: message(err) });
     return { ...empty, robotsAllowed: true, verdict: unavailableVerdict("fetch_failed", target.domain) };
+  }
+}
+
+/**
+ * 껍데기 리다이렉트의 목적지 URL. 따라가면 안 되는 경우는 전부 undefined 다:
+ * 껍데기가 아니거나, 목적지가 없거나, 다른 출처거나, 자기 자신이거나, URL 이 깨졌거나.
+ */
+function shellRedirectDestination(scan: PageScan, finalUrl: string): string | undefined {
+  if (scan.redirectTarget === undefined) return undefined;
+  if (scan.textLength >= SHELL_TEXT_LENGTH || scan.linkCount >= SHELL_LINK_COUNT) return undefined;
+  try {
+    const base = new URL(finalUrl);
+    const dest = new URL(scan.redirectTarget, base);
+    if (dest.origin !== base.origin) return undefined;
+    if (dest.href === base.href) return undefined;
+    return dest.href;
+  } catch {
+    return undefined;
   }
 }
 

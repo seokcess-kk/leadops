@@ -12,8 +12,10 @@ import { countSkip, emptyResult, type StageContext, type StageHandler, type Stag
 /**
  * 스테이지 3.5 — 홈페이지 발견 (설계서 3.2 · M1 소스 보강).
  *
- * `hospUrl` 이 없는 업체에 대해 **지역검색으로 후보 URL 을 찾아 `websites` 에 넣는다.**
- * 판정은 하지 않는다 — 다음 스테이지(`homepage_detect`)의 다신호 판정이 그대로 결정한다.
+ * 평가 가능한 후보가 없는 업체 — `hospUrl` 이 없거나, 있는 후보가 전부 최신 관측
+ * `unavailable`(NXDOMAIN·robots 차단) — 에 대해 **지역검색으로 후보 URL 을 찾아
+ * `websites` 에 넣는다.** 판정은 하지 않는다 — 다음 스테이지(`homepage_detect`)의
+ * 다신호 판정이 그대로 결정한다.
  *
  * ## 왜 필요한가
  *
@@ -108,14 +110,29 @@ export const homepageDiscoverStage: StageHandler = {
     for (;;) {
       if (exhausted) break;
 
-      // ❗ URL 이 **없는** 업체만 본다. 이미 있으면 발견할 이유가 없고, 덮어쓰면
-      //    공공 API 가 준 값을 검색 결과로 바꾸는 것이 된다.
+      // ❗ **평가 가능한 후보가 없는** 업체만 본다. 두 경우다:
+      //    (a) websites 행이 아예 없다 — 원래 대상
+      //    (b) 모든 후보의 최신 관측이 unavailable 이다 — 낡은 hospUrl(NXDOMAIN·robots
+      //        차단)만 있는 업체. "URL 이 있다" 는 이유로 건너뛰면 영원히 unavailable 에
+      //        머문다 (골드셋 FN 실사례).
+      //    아직 관측이 없는 후보가 있으면 제외한다 — 먼저 판정 기회를 준다. 살아있는
+      //    관측(uncertain 포함)이 있어도 제외한다 — 검색 결과가 판정을 앞지르면 안 된다.
+      //    기존 행은 어떤 경우에도 덮지 않는다. 후보를 **추가**할 뿐이다.
       const targets = await ctx.sql<Target[]>`
         select c.id as company_id, c.name, c.phone, c.address, c.region_sigungu
         from companies c
         join company_observations o on o.company_id = c.id and o.attempt_id = ${ctx.attemptId}
         where c.excluded_reason is null
-          and not exists (select 1 from websites w where w.company_id = c.id)
+          and not exists (
+            select 1 from websites w
+            where w.company_id = c.id
+              and (
+                not exists (select 1 from website_observations wo where wo.website_id = w.id)
+                or (select wo.official_status from website_observations wo
+                    where wo.website_id = w.id
+                    order by wo.observed_at desc limit 1) <> 'unavailable'
+              )
+          )
         order by c.id
         limit ${BATCH} offset ${offset}
       `;
