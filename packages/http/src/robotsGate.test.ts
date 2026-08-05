@@ -88,8 +88,15 @@ describe("❗ fail-closed", () => {
     expect(decision.failure).toBe("fetch_error");
   });
 
-  it("403 면 막는다", async () => {
-    expect((await gateWith(() => ({ status: 403 })).gate.check("https://a.kr/x")).allowed).toBe(false);
+  it("❗ 4xx(401·403)는 허용한다 — RFC 9309 unavailable (D-005)", async () => {
+    // 실측(골드셋 FN): 사람은 열리는 사이트의 robots.txt 가 403 을 줬다. RFC 9309
+    // §2.3.1.3 은 400-499 를 "unavailable" 로 보고 접근 가능으로 다룰 수 있다고 하고,
+    // Google 도 같게 동작한다. 5xx·네트워크 실패는 그대로 fail-closed 다.
+    const forbidden = await gateWith(() => ({ status: 403 })).gate.check("https://a.kr/x");
+    expect(forbidden.allowed).toBe(true);
+    expect(forbidden.failure).toBe("unavailable_4xx");
+    const unauthorized = await gateWith(() => ({ status: 401 })).gate.check("https://a.kr/x");
+    expect(unauthorized.allowed).toBe(true);
   });
 
   it("네트워크 오류면 막는다", async () => {

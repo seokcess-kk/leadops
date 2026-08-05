@@ -43,8 +43,10 @@ const SITES: Record<string, Site> = {
   "raon-derm.test": { robots: "User-agent: *\nAllow: /\n", html: FULL_HTML },
   // robots 가 전면 금지 → 가져오지 않는다
   "blocked.test": { robots: "User-agent: *\nDisallow: /\n", html: FULL_HTML },
-  // robots 조회 실패 → fail-closed
+  // robots 조회 실패(5xx) → fail-closed
   "broken.test": { robotsStatus: 503, html: FULL_HTML },
+  // robots 403 → RFC 9309 unavailable — 허용 (D-005). WAF 가 봇에게 403 을 주는 실사례
+  "forbidden.test": { robotsStatus: 403, html: FULL_HTML },
   // robots 없음(404) → 전면 허용. 내용은 껍데기
   "shell.test": { robotsStatus: 404, html: `<html><head><title>준비중</title></head><body>준비중</body></html>` },
   // 애그리게이터 도메인 — 가져올 수는 있어도 공식 홈페이지가 아니다
@@ -211,9 +213,12 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
       name: "라온피부과의원", host: "jsshell.test", phone: "0212345678", sigungu: "강남구",
     });
     ids["crossshell"] = await seed(attemptId, runDate, { name: "교차셸의원", host: "crossshell.test" });
+    ids["forbidden"] = await seed(attemptId, runDate, {
+      name: "라온피부과의원", host: "forbidden.test", phone: "0212345678", sigungu: "강남구",
+    });
 
     const result = await homepageStage.run(makeContext(runId, attemptId, runDate), {});
-    expect(result.processed).toBe(9);
+    expect(result.processed).toBe(10);
   }, 60_000);
 
   const observationOf = async (key: string) => {
@@ -251,11 +256,18 @@ describe("homepage_detect — 공식 홈페이지 판별", () => {
     expect(row.signals["reason"]).toBe("robots_disallowed");
   });
 
-  it("❗ robots.txt 조회에 실패하면 fail-closed 다", async () => {
+  it("❗ robots.txt 조회에 실패하면(5xx) fail-closed 다", async () => {
     const row = await observationOf("broken");
     expect(row.official_status).toBe("unavailable");
     expect(row.robots_allowed).toBe(false);
     expect(row.signals["reason"]).toBe("robots_fetch_error");
+  });
+
+  it("❗ robots.txt 가 403 이면 가져와서 판정한다 (RFC 9309 unavailable · D-005)", async () => {
+    const row = await observationOf("forbidden");
+    expect(row.official_status).toBe("confirmed");
+    expect(row.robots_allowed).toBe(true);
+    expect(row.http_status).toBe(200);
   });
 
   it("❗ Crawl-delay 가 상한을 넘어도 포기하지 않는다 — 단일 요청은 위반할 간격이 없다", async () => {

@@ -13,9 +13,10 @@ import {
  *
  * 도메인마다 robots.txt 를 한 번만 받아 캐시하고, 경로별 허용 여부를 판정한다.
  *
- * 원칙 (설계서 3.5절):
+ * 원칙 (설계서 3.5절 · D-005):
  *  - 404/410 → robots.txt 가 없는 것이므로 **전면 허용** (표준 동작)
- *  - 그 외 실패 → **fail-closed**. 판단할 수 없으면 가지 않는다.
+ *  - 그 외 4xx → **전면 허용** (RFC 9309 §2.3.1.3 "unavailable" · 발주자 결정 D-005)
+ *  - 5xx·네트워크 실패 → **fail-closed**. 판단할 수 없으면 가지 않는다.
  *  - 같은 오리진에 동시에 여러 요청이 와도 robots.txt 는 **한 번만** 받는다.
  */
 
@@ -123,7 +124,14 @@ export class RobotsGate {
       if (res.status === 404 || res.status === 410) {
         return { robots: null, failure: "not_found", fetchedAt };
       }
-      if (res.status >= 400) {
+      if (res.status >= 400 && res.status < 500) {
+        // RFC 9309 §2.3.1.3: 4xx 는 "unavailable" — 접근 가능으로 다룰 수 있다 (D-005).
+        // 실측: WAF 가 봇의 robots.txt 요청에 403 을 주는 사이트가 있다. 사람이 열리는
+        // 사이트를 robots 403 때문에 영영 판정하지 못하는 것이 이 분기가 막는 손실이다.
+        this.#log.warn("robots.unavailable_4xx", { url: redactUrl(url), status: res.status });
+        return { robots: null, failure: "unavailable_4xx", fetchedAt };
+      }
+      if (res.status >= 500) {
         this.#log.warn("robots.status", { url: redactUrl(url), status: res.status });
         return { robots: null, failure: "fetch_error", fetchedAt };
       }

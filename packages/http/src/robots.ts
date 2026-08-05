@@ -197,8 +197,11 @@ export function isAllowed(robots: RobotsTxt, userAgentToken: string, path: strin
 /** 캐시 엔트리. 조회 실패도 캐시해서 같은 도메인을 반복 두드리지 않는다. */
 export interface RobotsCacheEntry {
   robots: RobotsTxt | null;
-  /** null 인 경우의 사유. 'not_found' 는 전면 허용, 그 외는 fail-closed. */
-  failure?: "not_found" | "fetch_error" | "too_large";
+  /**
+   * null 인 경우의 사유. 'not_found'(404/410)와 'unavailable_4xx'(그 외 4xx —
+   * RFC 9309 §2.3.1.3 · D-005)는 전면 허용, 그 외는 fail-closed.
+   */
+  failure?: "not_found" | "unavailable_4xx" | "fetch_error" | "too_large";
   fetchedAt: number;
 }
 
@@ -209,7 +212,8 @@ export const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
  *
  * - 200 + 본문 → 파싱 결과에 따름
  * - 404/410    → robots.txt 가 없는 것이므로 **전면 허용** (표준 동작)
- * - 그 외 실패 → **fail-closed. 차단한다.**
+ * - 그 외 4xx  → **전면 허용** (RFC 9309 §2.3.1.3 "unavailable" · 발주자 결정 D-005)
+ * - 5xx·네트워크 실패 → **fail-closed. 차단한다.**
  */
 export function decideFromCache(
   entry: RobotsCacheEntry,
@@ -217,6 +221,8 @@ export function decideFromCache(
   path: string,
 ): RobotsDecision {
   if (entry.robots) return isAllowed(entry.robots, userAgentToken, path);
-  if (entry.failure === "not_found") return { allowed: true };
+  if (entry.failure === "not_found" || entry.failure === "unavailable_4xx") {
+    return { allowed: true };
+  }
   return { allowed: false };
 }
