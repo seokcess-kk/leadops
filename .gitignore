@@ -3,9 +3,10 @@ dist/
 .turbo/
 *.tsbuildinfo
 
-.env
-.env.local
-.env.*.local
+# ❗ `.env` 만 적으면 백업본(`.env.bak-*`)·변형이 추적 대상으로 남는다. 실제 키가 든
+# 파일이라 `git add .` 한 번으로 커밋된다. 넓게 막고 템플릿만 되돌린다.
+.env*
+!.env.example
 
 # 스파이크 산출물
 out/
