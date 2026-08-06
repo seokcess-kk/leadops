@@ -1,10 +1,12 @@
 import type { SearchAdapter } from "@leadops/adapters";
 import {
   discoverHomepage,
+  discoverHomepageFromWebSearch,
   discoveryQuery,
   type DiscoveryRejection,
   type KnownCompany,
   type LocalCandidate,
+  type WebCandidate,
 } from "../homepageDiscovery";
 import { QuotaGuard, quotaSettingsFrom } from "../quota";
 import { countSkip, emptyResult, type StageContext, type StageHandler, type StageResult } from "./types";
@@ -39,6 +41,9 @@ import { countSkip, emptyResult, type StageContext, type StageHandler, type Stag
  *
  * ❗ 이 스테이지는 `websites` 를 **넣기만** 한다. `official_status` 를 쓰지 않는다 —
  *    발견과 판정을 한 곳에서 하면 "검색이 찾았으니 공식" 이 되어 다신호 판정이 무력해진다.
+ *
+ * 지역검색이 근거를 못 찾으면 웹검색(webkr)으로 1회 폴백한다 — 텍스트 근거(상호 접미
+ * 완화 + 시군구 동시 포함).
  */
 
 /** 업체당 지역검색 호출 수. 상호+시군구 질의 하나면 충분하다 (display 상한이 5다). */
@@ -46,6 +51,9 @@ const CALLS_PER_COMPANY = 1;
 
 /** 지역검색 결과 상한. `MAX_DISPLAY.local` 이 5 이므로 그 이상은 의미가 없다. */
 const DISPLAY = 5;
+
+/** 웹검색 폴백 결과 상한. 텍스트 근거 필터라 상위권만 의미가 있다. */
+const WEB_DISPLAY = 10;
 
 const BATCH = 100;
 
@@ -184,18 +192,61 @@ export const homepageDiscoverStage: StageHandler = {
         }
 
         const discovery = discoverHomepage(known, candidates);
-        if (discovery.url === undefined) {
+        let adopted =
+          discovery.url === undefined ? undefined : { url: discovery.url, basis: discovery.basis ?? null };
+
+        // ── webkr 폴백 ──
+        // 조회는 됐으나 **근거가 없어** 채택에 실패한 경우에만 시도한다. 조회 에러는
+        // 위의 catch 가 이미 search_failed 로 남기고 continue 했다 (설계 문서 B절).
+        if (adopted === undefined) {
+          const webReserved = await quota.reserve(
+            CALLS_PER_COMPANY,
+            `discover:webkr:${ctx.attemptId}:${target.company_id}`,
+          );
+          if (!webReserved.granted) {
+            exhausted = true;
+            countSkip(result, "quota_exhausted");
+            ctx.logger.warn("stage.discover.quota_exhausted", {
+              provider: quota.provider,
+              used: webReserved.used,
+              cap: webReserved.cap,
+            });
+            break;
+          }
+          try {
+            const web = await adapter.search("webkr", discoveryQuery(known), WEB_DISPLAY);
+            const webHits: WebCandidate[] = web.hits.map((h) => ({
+              title: h.title,
+              link: h.link,
+              description: h.description,
+            }));
+            const webDiscovery = discoverHomepageFromWebSearch(known, webHits);
+            if (webDiscovery.url !== undefined) {
+              adopted = { url: webDiscovery.url, basis: webDiscovery.basis ?? null };
+            } else {
+              countSkip(result, `webkr_${webDiscovery.rejected ?? "no_text_evidence"}`);
+            }
+          } catch (err) {
+            countSkip(result, "webkr_search_failed");
+            ctx.logger.warn("stage.discover.webkr_failed", {
+              companyId: target.company_id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        if (adopted === undefined) {
           countSkip(result, discovery.rejected ?? ("no_matching_evidence" satisfies DiscoveryRejection));
           continue;
         }
 
-        const host = new URL(discovery.url).hostname.toLowerCase().replace(/^www\./, "");
+        const host = new URL(adopted.url).hostname.toLowerCase().replace(/^www\./, "");
         // ❗ 멱등하다. 잡이 재시도돼도 같은 행이 두 번 생기지 않는다.
         await ctx.sql`
           insert into websites (company_id, canonical_url, domain,
                                 discovery_source, discovery_basis, discovered_at)
-          values (${target.company_id}, ${discovery.url}, ${host},
-                  ${adapter.sourceName}, ${discovery.basis ?? null}, now())
+          values (${target.company_id}, ${adopted.url}, ${host},
+                  ${adapter.sourceName}, ${adopted.basis}, now())
           on conflict (company_id, domain) do nothing
         `;
         found++;

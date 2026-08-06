@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   discoverHomepage,
+  discoverHomepageFromWebSearch,
   discoveryQuery,
   evidenceFor,
   normalizeName,
@@ -178,5 +179,60 @@ describe("discoveryQuery", () => {
 
   it("시군구를 모르면 상호만 보낸다", () => {
     expect(discoveryQuery({ ...known, regionSigungu: null })).toBe("강남삼성피부과의원");
+  });
+});
+
+describe("웹검색 폴백 — 텍스트 근거 (discoverHomepageFromWebSearch)", () => {
+  const known = { name: "기장필피부과의원", phone: null, regionSigungu: "기장군" };
+
+  it("상호(접미 완화)와 시군구가 제목·설명에 함께 나타나면 채택한다", () => {
+    // 실사례 패턴: 사이트 제목은 종별 접미 없이 "기장필피부과" 로 적힌다.
+    const r = discoverHomepageFromWebSearch(known, [
+      { title: "기장필피부과 - 부산 기장군 피부과전문의", link: "https://feelskin.kr/", description: "" },
+    ]);
+    expect(r.url).toBe("https://feelskin.kr/");
+    expect(r.basis).toBe("name_region_text");
+  });
+
+  it("❗ 상호만 맞으면 거절한다 — 동명이인", () => {
+    const r = discoverHomepageFromWebSearch(known, [
+      { title: "기장필피부과 예약 안내", link: "https://someone.kr/", description: "빠른 예약" },
+    ]);
+    expect(r.url).toBeUndefined();
+    expect(r.rejected).toBe("no_text_evidence");
+  });
+
+  it("❗ 시군구만 맞으면 거절한다 — 옆 건물 다른 병원", () => {
+    const r = discoverHomepageFromWebSearch(known, [
+      { title: "기장군 피부 관리 잘하는 곳", link: "https://other.kr/", description: "기장군 추천" },
+    ]);
+    expect(r.rejected).toBe("no_text_evidence");
+  });
+
+  it("❗ 애그리게이터·SNS 링크는 텍스트가 맞아도 요청 전에 자른다", () => {
+    const r = discoverHomepageFromWebSearch(known, [
+      { title: "기장필피부과", link: "https://blog.naver.com/feelskin", description: "기장군" },
+    ]);
+    expect(r.url).toBeUndefined();
+    expect(r.rejected).toBe("disqualifying_domain");
+  });
+
+  it("❗ 순위는 근거가 아니다 — 무근거 1위를 건너뛰고 근거 있는 2위를 채택한다", () => {
+    const r = discoverHomepageFromWebSearch(known, [
+      { title: "피부과 순위 TOP10", link: "https://rank.kr/", description: "전국" },
+      { title: "기장필피부과 | 기장군", link: "https://feelskin.kr/", description: "" },
+    ]);
+    expect(r.url).toBe("https://feelskin.kr/");
+  });
+
+  it("시군구를 모르는 업체는 텍스트 근거가 성립하지 않는다", () => {
+    const r = discoverHomepageFromWebSearch({ name: "기장필피부과의원", regionSigungu: null }, [
+      { title: "기장필피부과 기장군", link: "https://feelskin.kr/", description: "" },
+    ]);
+    expect(r.rejected).toBe("no_text_evidence");
+  });
+
+  it("결과가 없으면 no_candidates 다", () => {
+    expect(discoverHomepageFromWebSearch(known, []).rejected).toBe("no_candidates");
   });
 });

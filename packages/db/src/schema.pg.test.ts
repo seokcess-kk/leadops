@@ -39,6 +39,7 @@ describe("마이그레이션", () => {
       "0014_homepage_discovery.sql",
       "0015_partition_observations.sql",
       "0016_naver_approval.sql",
+      "0017_webkr_discovery_basis.sql",
     ]);
   });
 

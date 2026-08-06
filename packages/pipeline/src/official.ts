@@ -110,8 +110,10 @@ function domainLabel(domain: string): string {
  *  - "한의원" 은 통째로만 뗀다 — "의원" 만 떼면 "행복한의원" → "행복한" 처럼 상호가
  *    아닌 수식어가 남아 아무 타이틀에나 맞는다
  *  - 뗀 나머지가 세 글자 미만이면 우연 일치가 잦아 변형을 쓰지 않는다
+ *
+ * homepageDiscovery 의 웹검색 폴백도 같은 완화 규칙을 쓴다.
  */
-function titleNeedles(normalized: string): string[] {
+export function titleNeedles(normalized: string): string[] {
   const stripped = normalized.endsWith("한의원")
     ? normalized.slice(0, -"한의원".length)
     : normalized.replace(/(?:의원|병원)$/, "");
