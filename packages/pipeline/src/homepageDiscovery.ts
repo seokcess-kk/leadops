@@ -1,4 +1,6 @@
 import { classifyDomain, isDisqualifyingClass } from "./aggregators";
+import { titleNeedles } from "./official";
+import { normalizeCompanyName } from "./normalize";
 
 /**
  * 홈페이지 발견 — 지역검색 결과에서 공식 홈페이지 후보를 고른다 (설계서 3.2 · M1 소스 보강).
@@ -41,6 +43,13 @@ export interface LocalCandidate {
   readonly roadAddress?: string | undefined;
 }
 
+/** 웹검색(webkr) 한 건에서 판별에 쓰는 값. 전화·주소 필드가 없다 — 텍스트가 전부다. */
+export interface WebCandidate {
+  readonly title: string;
+  readonly link: string;
+  readonly description: string;
+}
+
 /** 우리가 이미 알고 있는 사실 (공공 API 가 준 값). */
 export interface KnownCompany {
   readonly name: string;
@@ -49,7 +58,7 @@ export interface KnownCompany {
   readonly regionSigungu?: string | null | undefined;
 }
 
-export type DiscoveryBasis = "phone_match" | "name_and_region_match";
+export type DiscoveryBasis = "phone_match" | "name_and_region_match" | "name_region_text";
 
 /** 거절 사유. 집계해서 "왜 못 찾았는지" 를 운영자에게 보여 준다. */
 export type DiscoveryRejection =
@@ -57,7 +66,8 @@ export type DiscoveryRejection =
   | "no_link"
   | "disqualifying_domain"
   | "invalid_url"
-  | "no_matching_evidence";
+  | "no_matching_evidence"
+  | "no_text_evidence";
 
 export interface DiscoveryResult {
   readonly url?: string | undefined;
@@ -179,6 +189,54 @@ export function discoverHomepage(
 
   if (best) return { url: best.url, basis: best.basis, considered: candidates.length };
   return { rejected: rejection, considered: candidates.length };
+}
+
+/**
+ * 웹검색(webkr) 결과에서 홈페이지 후보를 고른다 — 지역검색 폴백.
+ *
+ * webkr 히트에는 전화·주소가 없어 지역검색의 근거(전화 일치)를 쓸 수 없다. 대신
+ * 지역검색의 "상호 + 시군구 동시 일치"(약한 근거)와 동급을 **텍스트로 재현**한다:
+ * 제목+설명에 상호(종별 접미 완화 — `titleNeedles`)와 시군구가 **함께** 나타나야 한다.
+ *
+ * ❗ 검색 순위는 근거가 아니다 — 텍스트 근거 통과분 안에서 문서순 첫 건만 쓴다.
+ */
+export function discoverHomepageFromWebSearch(
+  known: KnownCompany,
+  hits: readonly WebCandidate[],
+): DiscoveryResult {
+  if (hits.length === 0) return { rejected: "no_candidates", considered: 0 };
+
+  const normalized = normalizeCompanyName(known.name);
+  const sigungu = normalizeCompanyName((known.regionSigungu ?? "").trim());
+  const needles = normalized.length >= 3 ? titleNeedles(normalized) : [];
+
+  let rejection: DiscoveryRejection = "no_text_evidence";
+
+  for (const hit of hits) {
+    if (!hit.link) {
+      rejection = "no_link";
+      continue;
+    }
+    const host = hostOf(hit.link);
+    if (host === undefined) {
+      rejection = "invalid_url";
+      continue;
+    }
+    if (isDisqualifyingClass(classifyDomain(host))) {
+      rejection = "disqualifying_domain";
+      continue;
+    }
+
+    // 상호와 시군구가 **함께** 있어야 한다. 시군구를 모르면 근거가 성립하지 않는다.
+    if (sigungu === "" || needles.length === 0) continue;
+    const hay = normalizeCompanyName(`${hit.title} ${hit.description}`);
+    if (!needles.some((n) => hay.includes(n))) continue;
+    if (!hay.includes(sigungu)) continue;
+
+    return { url: hit.link, basis: "name_region_text", considered: hits.length };
+  }
+
+  return { rejected: rejection, considered: hits.length };
 }
 
 /**
