@@ -30,15 +30,22 @@ afterAll(async () => {
   await db.close();
 });
 
-/** 지역검색 결과를 고정해 주는 어댑터. 자격증명 없이 스테이지를 검증한다. */
-function stubAdapter(hitsByQuery: Record<string, SearchResult["hits"]>, opts: { fail?: boolean } = {}): SearchAdapter {
+/** 지역·웹검색 결과를 고정해 주는 어댑터. `${provider}:${keyword}` 키가 우선, 없으면 keyword 키(기존 local 테스트 호환). */
+function stubAdapter(
+  hitsByQuery: Record<string, SearchResult["hits"]>,
+  opts: { fail?: boolean; failProvider?: string } = {},
+): SearchAdapter & { calls: Array<{ provider: string; keyword: string }> } {
+  const calls: Array<{ provider: string; keyword: string }> = [];
   return {
     sourceName: "naver_search",
     verifiedAgainstLiveApi: false,
     unitsPerCall: 1,
+    calls,
     async search(provider: SearchProvider, keyword: string): Promise<SearchResult> {
-      if (opts.fail) throw new Error("네이버 응답 손상");
-      return { provider, keyword, total: 0, hits: hitsByQuery[keyword] ?? [] };
+      calls.push({ provider, keyword });
+      if (opts.fail || opts.failProvider === provider) throw new Error("네이버 응답 손상");
+      const hits = hitsByQuery[`${provider}:${keyword}`] ?? hitsByQuery[keyword] ?? [];
+      return { provider, keyword, total: 0, hits };
     },
   };
 }
@@ -211,6 +218,58 @@ describe("homepage_discover", () => {
       {},
     );
     await expect(websitesOf(id)).resolves.toHaveLength(1);
+  });
+
+  it("❗ 지역검색이 근거를 못 찾으면 웹검색으로 폴백해 텍스트 근거로 채택한다", async () => {
+    const id = await company({ name: "웹폴백피부과의원", phone: "02-000-1111" });
+    const adapter = stubAdapter({
+      // local 은 전화도 상호+주소도 안 맞는 히트만 준다 → 채택 실패
+      "강남구 웹폴백피부과의원": [hit({ title: "다른의원", telephone: "02-999-0000", address: "부산" })],
+      // webkr 는 텍스트 근거가 있는 히트를 준다
+      "webkr:강남구 웹폴백피부과의원": [
+        { rank: 1, title: "웹폴백피부과 | 강남구", link: "https://webfallback.kr/", description: "" },
+      ],
+    });
+    const result = await homepageDiscoverStage.run(ctx(adapter), {});
+    const rows = await websitesOf(id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.canonical_url).toBe("https://webfallback.kr/");
+    expect(rows[0]?.discovery_basis).toBe("name_region_text");
+    expect(result.passed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("❗ 지역검색이 채택하면 웹검색을 호출하지 않는다 — 쿼터를 아낀다", async () => {
+    await company({ name: "로컬성공피부과의원", phone: "02-555-1234" });
+    const adapter = stubAdapter({
+      "강남구 로컬성공피부과의원": [hit({ title: "로컬성공피부과의원", telephone: "02-555-1234" })],
+    });
+    await homepageDiscoverStage.run(ctx(adapter), {});
+    const webCalls = adapter.calls.filter(
+      (c) => c.provider === "webkr" && c.keyword === "강남구 로컬성공피부과의원",
+    );
+    expect(webCalls).toHaveLength(0);
+  });
+
+  it("❗ 웹검색 조회 실패를 '홈페이지 없음' 으로 기록하지 않는다", async () => {
+    const id = await company({ name: "웹조회실패피부과의원", phone: "02-000-3333" });
+    const result = await homepageDiscoverStage.run(
+      ctx(stubAdapter({}, { failProvider: "webkr" })),
+      {},
+    );
+    await expect(websitesOf(id)).resolves.toHaveLength(0);
+    expect(result.skipped["webkr_search_failed"]).toBeGreaterThanOrEqual(1);
+  });
+
+  it("웹검색도 근거가 없으면 저장하지 않고 사유를 남긴다", async () => {
+    const id = await company({ name: "양쪽실패피부과의원", phone: "02-000-2222" });
+    const result = await homepageDiscoverStage.run(
+      ctx(stubAdapter({ "webkr:강남구 양쪽실패피부과의원": [
+        { rank: 1, title: "무관한 페이지", link: "https://unrelated.kr/", description: "" },
+      ] })),
+      {},
+    );
+    await expect(websitesOf(id)).resolves.toHaveLength(0);
+    expect(result.skipped["webkr_no_text_evidence"]).toBeGreaterThanOrEqual(1);
   });
 
   it("두 번 실행해도 같은 결과다 (멱등)", async () => {
