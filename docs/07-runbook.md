@@ -79,6 +79,18 @@ psql "$SUPABASE_DB_URL" \
 > 필요하고 로컬 검증 컨테이너(`postgres:17-alpine`)에는 없다. 검증하지 못한 SQL 을 체인에
 > 넣으면 배포에서 처음 실행된다.
 
+**스케줄 실행의 업종 제한** — `private_config.run_body` 가 `/internal/run` 의 요청 본문이
+된다 (없으면 `{}` = 전체 업종). **미검증 소스가 막혀 있는 동안은 반드시 좁힌다** —
+비워 두면 franchise `collect` 가 매일 dead 가 되어 실행이 `partial` 로 끝나고,
+"3영업일 연속 성공" 을 영영 못 넘는다 (2026-08-07 스모크에서 실증).
+
+```sql
+insert into private_config (key, value)
+values ('run_body', '{"industries":["derm","plastic","dental"]}')
+on conflict (key) do update set value = excluded.value, updated_at = now();
+-- 공정위 요청주소 확보·FTC 검증 후 이 행을 지우면 전체 업종으로 돌아간다
+```
+
 등록되는 잡:
 
 | 잡 | 스케줄 (UTC) | KST | 하는 일 |
