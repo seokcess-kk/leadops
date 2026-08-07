@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canHaveTextEvidence,
   discoverHomepage,
   discoverHomepageFromWebSearch,
   discoveryQuery,
@@ -234,5 +235,13 @@ describe("웹검색 폴백 — 텍스트 근거 (discoverHomepageFromWebSearch)"
 
   it("결과가 없으면 no_candidates 다", () => {
     expect(discoverHomepageFromWebSearch(known, []).rejected).toBe("no_candidates");
+  });
+
+  it("텍스트 근거 성립 가능 여부를 호출 전에 물을 수 있다 (canHaveTextEvidence)", () => {
+    // 스테이지가 webkr 쿼터를 선점하기 전에 확인해 보장된 헛호출을 아낀다.
+    expect(canHaveTextEvidence({ name: "기장필피부과의원", regionSigungu: "기장군" })).toBe(true);
+    expect(canHaveTextEvidence({ name: "기장필피부과의원", regionSigungu: null })).toBe(false);
+    expect(canHaveTextEvidence({ name: "기장필피부과의원", regionSigungu: "  " })).toBe(false);
+    expect(canHaveTextEvidence({ name: "온", regionSigungu: "기장군" })).toBe(false);
   });
 });

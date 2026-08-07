@@ -56,7 +56,7 @@ async function company(over: { name: string; phone?: string | null; sigungu?: st
   const [row] = await db.owner<Array<{ id: string }>>`
     insert into companies (dedupe_key, name, normalized_name, industry, region_sido, region_sigungu, phone, address)
     values (${`dk-${suffix}`}, ${over.name}, ${over.name}, 'derm', '서울특별시',
-            ${over.sigungu ?? "강남구"}, ${over.phone ?? null}, '서울특별시 강남구 테헤란로 1')
+            ${over.sigungu === undefined ? "강남구" : over.sigungu}, ${over.phone ?? null}, '서울특별시 강남구 테헤란로 1')
     returning id
   `;
   const id = row!.id;
@@ -137,12 +137,33 @@ describe("homepage_discover", () => {
     await expect(websitesOf(id)).resolves.toHaveLength(0);
   });
 
-  it("❗ 조회 실패를 '홈페이지 없음' 으로 기록하지 않는다", async () => {
+  it("❗ 조회 실패를 '홈페이지 없음' 으로 기록하지 않는다 — webkr 도 시도하지 않는다", async () => {
     const id = await company({ name: "조회실패피부과의원", phone: "02-333-4444" });
-    const result = await homepageDiscoverStage.run(ctx(stubAdapter({}, { fail: true })), {});
+    const adapter = stubAdapter({}, { fail: true });
+    const result = await homepageDiscoverStage.run(ctx(adapter), {});
     expect(result.skipped["search_failed"]).toBeGreaterThanOrEqual(1);
     // 실패는 우리 문제이지 그 업체의 상태가 아니다 — 아무것도 남기지 않는다.
     await expect(websitesOf(id)).resolves.toHaveLength(0);
+    // ❗ local 이 에러로 실패하면 같은 provider 인 webkr 도 시도하지 않는다 (설계 B절).
+    //    회귀 잠금 — catch 가 폴백 블록보다 앞에서 continue 하는 구조를 고정한다.
+    expect(adapter.calls.every((c) => c.provider === "local")).toBe(true);
+  });
+
+  it("❗ 텍스트 근거가 성립할 수 없는 업체는 webkr 를 호출하지 않는다 — 쿼터를 아낀다", async () => {
+    // 시군구를 모르면 상호+시군구 텍스트 근거가 구조적으로 성립하지 않는다.
+    // 그런 업체에 webkr 를 호출하면 결과와 무관하게 보장된 헛호출이다.
+    const id = await company({ name: "무지역피부과의원", phone: "02-000-4444", sigungu: null });
+    const adapter = stubAdapter({
+      "webkr:무지역피부과의원": [
+        { rank: 1, title: "무지역피부과 강남구", link: "https://noregion.kr/", description: "" },
+      ],
+    });
+    const result = await homepageDiscoverStage.run(ctx(adapter), {});
+    await expect(websitesOf(id)).resolves.toHaveLength(0);
+    expect(
+      adapter.calls.filter((c) => c.provider === "webkr" && c.keyword === "무지역피부과의원"),
+    ).toHaveLength(0);
+    expect(result.skipped["webkr_no_text_evidence"]).toBeGreaterThanOrEqual(1);
   });
 
   it("❗ 이미 URL 이 있는 업체는 건드리지 않는다 (공공 API 값을 검색 결과로 덮지 않는다)", async () => {
