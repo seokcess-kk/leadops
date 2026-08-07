@@ -57,9 +57,13 @@ begin
   -- ❗ 미검증 소스가 막혀 있는 동안 업종을 좁히는 데 쓴다 — 예:
   --    {"industries":["derm","plastic","dental"]} (공정위 요청주소 확보 전까지 franchise 제외.
   --    비워 두면 franchise collect 가 매일 dead 가 되어 실행이 partial 로 끝난다).
+  -- ❗ **서명 전에 jsonb 로 정규화한다.** pg_net 은 body 를 jsonb 로 직렬화해 보내는데
+  --    (콜론·쉼표 뒤 공백), 원문 위에 서명하면 전송 바이트와 달라져 bad_signature 가
+  --    난다 — 2026-08-07 스테이징 왕복 검증에서 실증. 정규화 후 서명하면 재직렬화가
+  --    멱등이라 서명한 바이트가 그대로 전송된다.
   select coalesce(
     (select value from private_config where key = 'run_body'), '{}'
-  ) into v_body;
+  )::jsonb::text into v_body;
 
   v_sig := 'sha256=' || encode(
     extensions.hmac(v_ts::text || '.' || v_body, v_secret, 'sha256'), 'hex'
