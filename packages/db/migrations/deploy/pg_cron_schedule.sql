@@ -47,12 +47,19 @@ declare
   v_base text;
   v_secret text;
   v_ts bigint := floor(extract(epoch from now()))::bigint;
-  v_body text := '{}';
+  v_body text;
   v_sig text;
   v_request_id bigint;
 begin
   select value into strict v_base from private_config where key = 'api_base';
   select value into strict v_secret from private_config where key = 'trigger_secret';
+  -- 스케줄 실행의 요청 본문. 없으면 '{}' = 전체 업종.
+  -- ❗ 미검증 소스가 막혀 있는 동안 업종을 좁히는 데 쓴다 — 예:
+  --    {"industries":["derm","plastic","dental"]} (공정위 요청주소 확보 전까지 franchise 제외.
+  --    비워 두면 franchise collect 가 매일 dead 가 되어 실행이 partial 로 끝난다).
+  select coalesce(
+    (select value from private_config where key = 'run_body'), '{}'
+  ) into v_body;
 
   v_sig := 'sha256=' || encode(
     extensions.hmac(v_ts::text || '.' || v_body, v_secret, 'sha256'), 'hex'
