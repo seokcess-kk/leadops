@@ -1,5 +1,6 @@
 import type { SearchAdapter } from "@leadops/adapters";
 import {
+  canHaveTextEvidence,
   discoverHomepage,
   discoverHomepageFromWebSearch,
   discoveryQuery,
@@ -198,7 +199,11 @@ export const homepageDiscoverStage: StageHandler = {
         // ── webkr 폴백 ──
         // 조회는 됐으나 **근거가 없어** 채택에 실패한 경우에만 시도한다. 조회 에러는
         // 위의 catch 가 이미 search_failed 로 남기고 continue 했다 (설계 문서 B절).
-        if (adopted === undefined) {
+        if (adopted === undefined && !canHaveTextEvidence(known)) {
+          // ❗ 텍스트 근거가 구조적으로 성립할 수 없으면(시군구 없음·상호 3자 미만)
+          //    쿼터를 선점하지도, 호출하지도 않는다 — 결과와 무관한 보장된 헛호출이다.
+          countSkip(result, "webkr_no_text_evidence");
+        } else if (adopted === undefined) {
           const webReserved = await quota.reserve(
             CALLS_PER_COMPANY,
             `discover:webkr:${ctx.attemptId}:${target.company_id}`,

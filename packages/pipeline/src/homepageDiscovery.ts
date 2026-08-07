@@ -200,15 +200,28 @@ export function discoverHomepage(
  *
  * ❗ 검색 순위는 근거가 아니다 — 텍스트 근거 통과분 안에서 문서순 첫 건만 쓴다.
  */
+/**
+ * 텍스트 근거가 구조적으로 성립할 수 있는가.
+ *
+ * 시군구를 모르거나 상호가 정규화 후 3자 미만이면 어떤 히트가 와도 채택할 수 없다.
+ * 스테이지가 webkr **쿼터를 선점하기 전에** 이것을 물어 보장된 헛호출을 아낀다 —
+ * 발견·ORS 가 합산하는 일일 한도에서 낭비되는 몫이다.
+ */
+export function canHaveTextEvidence(known: KnownCompany): boolean {
+  return (known.regionSigungu ?? "").trim() !== "" && normalizeCompanyName(known.name).length >= 3;
+}
+
 export function discoverHomepageFromWebSearch(
   known: KnownCompany,
   hits: readonly WebCandidate[],
 ): DiscoveryResult {
   if (hits.length === 0) return { rejected: "no_candidates", considered: 0 };
+  // 성립 불가면 히트를 볼 필요가 없다 — 어떤 텍스트도 근거가 되지 못한다.
+  if (!canHaveTextEvidence(known)) return { rejected: "no_text_evidence", considered: hits.length };
 
   const normalized = normalizeCompanyName(known.name);
   const sigungu = normalizeCompanyName((known.regionSigungu ?? "").trim());
-  const needles = normalized.length >= 3 ? titleNeedles(normalized) : [];
+  const needles = titleNeedles(normalized);
 
   let rejection: DiscoveryRejection = "no_text_evidence";
 
@@ -227,8 +240,7 @@ export function discoverHomepageFromWebSearch(
       continue;
     }
 
-    // 상호와 시군구가 **함께** 있어야 한다. 시군구를 모르면 근거가 성립하지 않는다.
-    if (sigungu === "" || needles.length === 0) continue;
+    // 상호와 시군구가 **함께** 있어야 한다 (성립 가능성은 위에서 이미 확인했다).
     const hay = normalizeCompanyName(`${hit.title} ${hit.description}`);
     if (!needles.some((n) => hay.includes(n))) continue;
     if (!hay.includes(sigungu)) continue;
